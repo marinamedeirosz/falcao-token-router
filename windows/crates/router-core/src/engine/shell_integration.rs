@@ -293,11 +293,37 @@ claude() {{
     /// OEM do console, e acento ali é corrupção garantida — a mesma razão do
     /// `PROFILE_COMMENT` acima.
     ///
-    /// TRILHA T5: `@echo off`, o marcador num `rem`, uma guarda `if not exist`
-    /// no `router.exe` (é ela que mantém o terminal limpo depois de desinstalar
-    /// o app) e o `doskey claude=<router> shim $*`.
-    pub fn cmd_script(_router: &Path) -> String {
-        String::new()
+    /// E em SILÊNCIO absoluto: o `AutoRun` que carrega este arquivo roda em
+    /// TODA invocação do `cmd.exe`, inclusive os `cmd /c` que npm, MSBuild e as
+    /// tarefas do VS Code disparam — um byte impresso aqui corrompe um `for /f`
+    /// de terceiro que capture a saída. Daí o `@echo off`, nada que imprima, e
+    /// nenhum `<`, `>` ou `|` nem dentro de `rem`: o cmd interpreta
+    /// redirecionamento na linha de comentário também, e o erro iria para a
+    /// tela a cada abertura.
+    ///
+    /// A guarda `if not exist` é o que mantém o terminal limpo depois de
+    /// desinstalar o app: o `shell.cmd` mora na pasta de DADOS, que o
+    /// desinstalador não apaga, e sem o binário ele simplesmente não faz nada.
+    /// Com rótulo próprio em vez de `goto :eof`, que só existe com as extensões
+    /// de comando ligadas — desligadas, ele imprimiria o erro que a macro
+    /// inteira existe para evitar.
+    ///
+    /// A macro do doskey SÓ vale em console interativo: em `cmd /c` ela não se
+    /// aplica e o `claude` de verdade é chamado direto — é essa a propriedade
+    /// de segurança do desenho. O `$*` passa o resto da linha cru, e o caminho
+    /// vai entre aspas porque pode ter espaço.
+    pub fn cmd_script(router: &Path) -> String {
+        let router = router.to_string_lossy();
+        format!(
+            r#"@echo off
+rem Falcao Router - integracao de terminal do Prompt de Comando.
+rem Gerado pelo app; nao edite a mao (ele regrava este arquivo quando muda de lugar).
+rem {SHIM_MARKER}
+if not exist "{router}" goto falcao_fim
+doskey claude="{router}" shim $*
+:falcao_fim
+"#
+        )
     }
 
     /// Grava os scripts, cada um na codificação do seu shell: `shell.ps1` em
