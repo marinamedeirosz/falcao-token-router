@@ -394,6 +394,61 @@ fn the_bash_shim_marker_is_a_command_not_a_comment() {
     assert!(ps.contains("falcao-claude-anterior"));
 }
 
+/// O `shell.cmd` é carregado pelo `AutoRun`, que roda em TODA invocação do
+/// `cmd.exe` — inclusive os `cmd /c` de npm, MSBuild e tarefas do VS Code. Um
+/// byte impresso ali corrompe um `for /f` de terceiro; um acento, lido na code
+/// page OEM do console, corrompe o próprio arquivo. E a guarda é o que deixa o
+/// terminal limpo depois de desinstalar o app (o script fica na pasta de dados).
+#[test]
+fn the_cmd_script_is_ascii_silent_and_guarded() {
+    let router = r"C:\Users\exemplo\AppData\Local\FalcaoTokenRouter\router.exe";
+    let cmd = ShellIntegration::cmd_script(Path::new(router));
+
+    assert!(cmd.is_ascii(), "{cmd}");
+    assert!(cmd.starts_with("@echo off"), "{cmd}");
+    assert!(cmd.contains("falcao-router-shim"), "{cmd}");
+    assert!(cmd.contains(&format!("if not exist \"{router}\"")), "{cmd}");
+    assert!(
+        cmd.contains(&format!("doskey claude=\"{router}\" shim $*")),
+        "{cmd}"
+    );
+    // O único `echo` é o que desliga o eco: nada mais pode escrever na tela.
+    assert_eq!(cmd.matches("echo").count(), 1, "{cmd}");
+    // O cmd interpreta redirecionamento até dentro de `rem`.
+    assert!(
+        !cmd.contains('>') && !cmd.contains('<') && !cmd.contains('|'),
+        "{cmd}"
+    );
+}
+
+/// Com o `cmd_script` devolvendo texto, o `write_scripts` passa a gravar o
+/// `shell.cmd`: CRLF (o interpretador de lote é o mais sensível dos três a fim
+/// de linha solto) e sem BOM, que ele leria como parte da primeira linha.
+#[test]
+fn the_cmd_script_is_written_in_ascii_and_crlf() {
+    let tmp = tempfile::tempdir().unwrap();
+    let router = Path::new(r"C:\Users\exemplo\AppData\Local\FalcaoTokenRouter\router.exe");
+    let cmd = tmp.path().join("shell.cmd");
+
+    ShellIntegration::write_scripts(
+        router,
+        &tmp.path().join("shell.ps1"),
+        &tmp.path().join("shell.sh"),
+        &cmd,
+    )
+    .unwrap();
+
+    let bytes = fs::read(&cmd).unwrap();
+    assert!(bytes.is_ascii(), "shell.cmd fora do ASCII");
+    assert!(!bytes.starts_with(&[0xEF, 0xBB, 0xBF]), "BOM no shell.cmd");
+    let text = String::from_utf8(bytes).unwrap();
+    assert_eq!(
+        text.matches('\n').count(),
+        text.matches("\r\n").count(),
+        "LF solto: {text:?}"
+    );
+}
+
 // --- Onde a integração mora ---
 
 /// O Git Bash acusa um WARNING vermelho quando acha `.bashrc` sem
