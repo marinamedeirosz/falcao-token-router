@@ -5,8 +5,9 @@
 //   ?view=home|flyout  &state=uso|vazio|pronta|critico|erro  &lang=en|pt-BR
 //   &tab=groups|settings  &select=<conta>  &foreign=<e-mail>  &scripts=current|missing|stale
 // A integração de terminal e os ajustes:
-//   &terminal=ausente|ok|bloqueado|parcial|velha|semrouter  &devmode=1
+//   &terminal=ausente|ok|bloqueado|parcial|velha|semrouter|cmd|cmdligado  &devmode=1
 //   &install=falha (Ativar grava só parte)  &diretiva=1 (Permitir não vence a política)
+//   &doctor=falha (o "Diagnosticar" nem consegue rodar o router.exe)
 //   &autostart=falha (o Windows recusa o registro)  &taskbar=1
 //   &resumo=fiveHourReset,model (o que o resumo das contas NÃO mostra)
 // A status line (aba Ajustes):
@@ -198,11 +199,13 @@ const PROFILES: Record<ShellName, string> = {
 /** Um shell com a integração no lugar; o cenário estraga o que quiser. */
 function shellView(shell: ShellName, partial: Partial<ShellView> = {}): ShellView {
   const bash = shell === "gitBash";
+  // Só o PowerShell tem política de execução: o Git Bash e o cmd, nenhuma.
+  const powerShell = shell === "powerShell7" || shell === "windowsPowerShell";
   return {
     shell,
     profiles: [PROFILES[shell]],
     loadsIntegration: true,
-    policy: bash ? null : "RemoteSigned",
+    policy: powerShell ? "RemoteSigned" : null,
     policyBlocks: false,
     chainsUserFunction: false,
     bashLogin: bash ? "loads" : null,
@@ -213,6 +216,10 @@ function shellView(shell: ShellName, partial: Partial<ShellView> = {}): ShellVie
 
 /** As mesmas contas do `view` do Rust (`terminal.rs`). */
 function terminalView(scripts: ScriptsState, shells: ShellView[], routerFound = true): TerminalView {
+  // O cmd fica fora dos dois, como no Rust: a integração dele é um valor GLOBAL
+  // do registro, opt-in por botão próprio. Contá-lo deixaria o "Ativar" aceso
+  // para sempre em quem não a quis — prometendo o que instalar não faz.
+  const required = shells.filter((s) => s.shell !== "cmd");
   return {
     routerFound,
     scripts,
@@ -221,9 +228,11 @@ function terminalView(scripts: ScriptsState, shells: ShellView[], routerFound = 
     fullyInstalled:
       routerFound &&
       scripts === "current" &&
-      shells.every((s) => s.loadsIntegration && !s.policyBlocks && s.bashLogin !== "ignores"),
+      // Lista vazia faria o `every` dizer "pronta" com ZERO shell coberto.
+      required.length > 0 &&
+      required.every((s) => s.loadsIntegration && !s.policyBlocks && s.bashLogin !== "ignores"),
     blockedByPolicy: shells.some((s) => s.policyBlocks),
-    needsInstall: scripts !== "current" || shells.some((s) => !s.loadsIntegration),
+    needsInstall: scripts !== "current" || required.some((s) => !s.loadsIntegration),
   };
 }
 
@@ -252,6 +261,22 @@ const terminals: Record<string, () => TerminalView> = {
     ]),
   velha: () =>
     terminalView("stale", [shellView("powerShell7"), shellView("windowsPowerShell"), shellView("gitBash")]),
+  // O cmd está sempre no quadro (não existe Windows sem `cmd.exe`): o que muda
+  // é o AutoRun estar escrito ou não — e desligado é o estado de fábrica.
+  cmd: () =>
+    terminalView("current", [
+      shellView("powerShell7"),
+      shellView("windowsPowerShell"),
+      shellView("gitBash"),
+      shellView("cmd", { loadsIntegration: false }),
+    ]),
+  cmdligado: () =>
+    terminalView("current", [
+      shellView("powerShell7"),
+      shellView("windowsPowerShell"),
+      shellView("gitBash"),
+      shellView("cmd"),
+    ]),
   semrouter: () =>
     terminalView(
       "missing",
@@ -278,6 +303,9 @@ function installTerminal(): boolean {
     cmd: null,
   };
   const shells = terminal.shells.map((s) => {
+    // Instalar escreve scripts e linhas de perfil, NUNCA o AutoRun: a linha do
+    // cmd sai daqui como entrou (ela tem botão próprio).
+    if (s.shell === "cmd") return s;
     // Sem a linha no perfil a política nem era consultada; agora é.
     const policy = s.policy ?? factoryPolicy[s.shell];
     return { ...s, loadsIntegration: true, policy, policyBlocks: policy === "Restricted" };
@@ -703,6 +731,11 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   // A saída do `router doctor` é pt-BR fixo, como a da CLI: texto técnico.
   run_doctor: async () => {
     await new Promise((resolve) => setTimeout(resolve, 1200));
+    // Como o Tauri: um `Err(String)` do backend chega à tela como a string crua,
+    // não como `Error` — é isso que o painel formata.
+    if (param("doctor") === "falha") {
+      throw "O sistema não pode encontrar o arquivo especificado. (os error 2)";
+    }
     return [
       "router doctor",
       "  base: C:\\Users\\exemplo\\AppData\\Local\\com.synqo.falcao-router",
