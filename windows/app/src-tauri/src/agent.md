@@ -39,6 +39,10 @@
   thread FORA da trava (planeja → roda → publica), uma medição por vez, com o spinner no quadro.
   Grupo novo com a escolha de padrão (`add_group_with`); login estranho no `~\.claude`
   (`foreign_default_login`); dispensar o erro. `copy_text` (plugin clipboard) mora no `lib.rs`.
+- `terminal.rs` — também `enable_cmd_integration`/`disable_cmd_integration` (escrevem e apagam
+  o `AutoRun` do Prompt de Comando; gravam o `shell.cmd` ANTES de apontar para ele, porque
+  `AutoRun` para caminho morto faz o cmd reclamar a cada janela) e `run_doctor` (sobe o próprio
+  `router.exe doctor` e devolve a saída crua — pt-BR fixo, texto técnico, não passa por catálogo).
 - `terminal.rs` — a integração de terminal na tela: o quadro POR SHELL (`terminal_report`, fora
   da thread da interface — consulta a política de cada PowerShell), "Ativar/Reinstalar"
   (`install_integration`, devolve `ok` de verdade: o "Instalada ✓" do macOS aparecia mesmo com

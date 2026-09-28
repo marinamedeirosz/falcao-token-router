@@ -19,6 +19,10 @@
   (um link que rola até a seção), auto-troca, limiar (o número acompanha o arrasto; GRAVA SÓ AO
   SOLTAR), a lista reordenável e o rodapé (adicionar conta, "Medir contas" com spinner — uma
   medição por vez).
+- `DiagnosticsPanel.svelte` — o botão **Diagnosticar** e a saída do `router doctor`, em bloco
+  monoespacado. Componente próprio, e não mais um bloco na seção, por dois motivos: instalar e
+  diagnosticar são motivos de mudança diferentes, e o `TerminalSection` já está perto da régua
+  de 600 linhas. A saída é pt-BR fixo mesmo com a interface em inglês — a tela rotula isso.
 - `TerminalSection.svelte` — a integração de terminal (≙ TerminalIntegrationRow): "Conferindo…"
   até o quadro chegar; convite + "Ativar"; depois, uma linha por shell (PS 7, PS 5.1, Git Bash)
   com ✓/⚠ e a correção de cada problema — "Ativar" só quando instalar resolve (`needsInstall`),

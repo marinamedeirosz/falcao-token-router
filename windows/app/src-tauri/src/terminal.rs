@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use router_core::engine::shell_integration::{ShellIntegration, ShellTargets, StatusShell};
+use router_core::engine::shell_integration::{
+    autorun_call, ShellIntegration, ShellTargets, StatusShell, SHIM_MARKER,
+};
 use router_core::engine::terminal_report::{
     allow_profiles, effective_policy, powershell_editions, BashLogin, EditionEnv, ScriptsState,
     ShellKind, TerminalReport,
@@ -245,25 +247,6 @@ pub async fn allow_profiles_for(app: AppHandle, shell: ShellName) -> Result<Term
 /// Sem o caminho do `router.exe` não há nem integração nem diagnóstico — e o
 /// motivo é sempre o mesmo, então a frase também.
 const NO_ROUTER: &str = "o app não sabe onde está o router.exe";
-
-/// O que marca o NOSSO segmento dentro do `AutoRun`. Cópia do `SHIM_MARKER` do
-/// motor, que é privado nos dois módulos que o usam: o quadro lê o registro
-/// procurando EXATAMENTE este texto, então um marcador diferente daria um
-/// "Ativar no cmd" que grava e nunca acende, e um "Desativar" sem nada que tirar.
-/// Se mudar lá, muda aqui (o certo é o motor exportá-lo — ver pendências).
-const SHIM_MARKER: &str = "falcao-router-shim";
-
-/// A linha que o `cmd.exe` roda antes do primeiro prompt.
-///
-/// O caminho vai entre aspas porque a pasta de dados pode ter espaço, e o
-/// marcador entra como ARGUMENTO, no mesmo segmento: o quadro reconhece a
-/// integração procurando o marcador no valor do `AutoRun`, e o caminho sozinho
-/// não o contém. Argumento, e não um `& rem <marcador>`, porque um segmento
-/// separado seria o único a sair na remoção — deixando a chamada do script órfã
-/// no registro. O `shell.cmd` não lê `%1`, então o extra é inerte.
-fn autorun_call(script: &Path) -> String {
-    format!("\"{}\" {SHIM_MARKER}", script.display())
-}
 
 /// O `shell.cmd` no disco, gravando-o se faltar.
 ///

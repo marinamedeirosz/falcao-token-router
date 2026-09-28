@@ -3,7 +3,8 @@
 ## Arquivos
 - `api.ts` — as chamadas ao backend (`app_info`, `get_snapshot`, `fit_flyout`, `open_home`,
   `quit_app`, as ações de grupos e contas, a integração de terminal — `terminal_report`,
-  `install_integration`, `allow_profiles_for` — e os ajustes — `get_settings`, `set_autostart`,
+  `install_integration`, `allow_profiles_for`, `enable_cmd_integration`,
+  `disable_cmd_integration`, `run_doctor` — e os ajustes — `get_settings`, `set_autostart`,
   `set_show_in_taskbar`, `set_hidden_summary`, `open_url` —, a status line — `get_status_line`, `set_status_line`,
   `test_status_line` —, o login — `start_login`, `start_relogin`,
   `current_login`, `login_submit_code`, `login_retry`, `login_recheck`, `login_close`) e os

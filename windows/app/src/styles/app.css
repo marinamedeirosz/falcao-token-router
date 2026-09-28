@@ -85,11 +85,20 @@ body {
   user-select: none;
 }
 
-/* O flyout tem a altura do conteúdo (a janela acompanha); nada de rolagem. */
+/* O flyout tem a altura do conteúdo, e a janela acompanha — até onde a TELA
+   deixa. Passando disso o backend limita (`flyout::fitted_height`), e aí a
+   rolagem vertical é a única forma de alcançar o rodapé, que tem Grupos,
+   Ajustes e Sair: sem ela, com contas suficientes, o usuário perde o caminho
+   para as telas do app e para fechar o programa. A horizontal continua
+   travada — a largura é fixa, e barra ali só roubaria espaço.
+   O painel mede a altura NATURAL (`getBoundingClientRect` em `Panel.svelte`) e
+   deixa o backend limitar; capá-la no CSS realimentaria a medida com o próprio
+   limite, e a janela nunca voltaria a crescer. */
 html[data-view="flyout"],
 html[data-view="flyout"] body {
   background: var(--flyout-bg);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* A largura de cada janela — no navegador (backend simulado) a página inteira

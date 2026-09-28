@@ -3,13 +3,8 @@
 //! Parte do `impl RouterConfigStore` — ver o `mod.rs` ao lado.
 
 use super::*;
+use crate::engine::shell_integration::{autorun_call, SHIM_MARKER};
 use crate::platform::command_processor::{self, CommandProcessorKey};
-
-/// O que identifica o NOSSO segmento no `AutoRun` — o mesmo marcador que os
-/// scripts carregam. Repetido aqui (como no `terminal_report`) porque no
-/// `shell_integration` ele é privado ao módulo; divergindo os três, a tela
-/// diria "não instalada" com o `AutoRun` no lugar.
-const SHIM_MARKER: &str = "falcao-router-shim";
 
 impl RouterConfigStore {
     // MARK: - Integração com o terminal
@@ -140,7 +135,7 @@ impl RouterConfigStore {
         // procura para dizer "instalada". O caminho sozinho não serviria — a
         // pasta de dados se chama `com.synqo.falcao-router`, que NÃO contém o
         // marcador, e sem reconhecê-lo cada clique somaria um segmento igual.
-        let call = format!("\"{}\" {SHIM_MARKER}", self.cmd_script_path().display());
+        let call = autorun_call(&self.cmd_script_path());
         let done = command_processor::install(key, &call, SHIM_MARKER).map(|_| ());
         self.record_integration(done)
     }

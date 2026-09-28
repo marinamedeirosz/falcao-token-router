@@ -5,7 +5,17 @@ em pt-BR, como as da CLI do macOS; `router: <msg>` no stderr e código 1 nas fal
 desconhecido sai com 2.
 
 ## Arquivos
-- `main.rs` — despacho por argv: `statusline`, `launch`, `is-group`, `rotate`, `doctor`, `measure`.
+- `main.rs` — despacho por argv: `statusline`, `launch`, `is-group`, `rotate`, `doctor`, `measure`,
+  `shim`, `uninstall-integration` (os dois novos vão no FIM da linha de uso: o teste dela compara
+  por prefixo)
+- `shim.rs` — `router shim`: o `claude` do Prompt de Comando. O `shell.ps1` e o `shell.sh` decidem
+  em shell script porque precisam ENCADEAR uma `function claude` do usuário; o cmd não tem função
+  nem perfil, e a macro `doskey` só sabe chamar um programa — então a decisão vem para o Rust.
+  Grupo vai para `launch`; o resto vai para o claude real com o ambiente INTOCADO.
+- `uninstall.rs` — `router uninstall-integration`: tira o segmento do `AutoRun`, a linha de cada
+  `$PROFILE` e a do `.bashrc`. Best-effort e falante (uma falha não aborta as outras). NÃO apaga
+  os scripts nem a pasta de dados, que o desinstalador preserva de propósito. Chamado pelo
+  `NSIS_HOOK_PREUNINSTALL`, ANTES de o `router.exe` sair do caminho..
 - `shared.rs` — base, home (`%USERPROFILE%`), `load_config`, credencial em arquivo COM a guarda
   do perfil padrão, `fail`, o shell detectado; reexporta o `run_with_timeout` do núcleo.
 - `statusline.rs` — o **sensor**: lê `rate_limits` do stdin (thread + prazo de 250 ms, pega o 1º

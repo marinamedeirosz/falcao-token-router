@@ -27,17 +27,11 @@ use std::io;
 use std::path::Path;
 
 use router_core::engine::router_paths::RouterPaths;
-use router_core::engine::shell_integration::{ShellIntegration, ShellTargets};
+use router_core::engine::shell_integration::{ShellIntegration, ShellTargets, SHIM_MARKER};
 use router_core::platform::command_processor::{self, CommandProcessorKey};
 use router_core::platform::profile_append::{remove_block, RemoveOutcome};
 
 use crate::shared;
-
-/// O que marca o NOSSO segmento no `AutoRun`, e é o MESMO que o quadro da
-/// integração procura (`terminal_report`). A simetria é o que importa: o que a
-/// tela chama de "instalado no cmd" é exatamente o que sai daqui — com outro
-/// marcador, um dos dois erraria em silêncio.
-const SHIM_MARKER: &str = "falcao-router-shim";
 
 /// A chave do `AutoRun`: a de verdade, ou a de teste que `ROUTER_CMD_TEST_KEY`
 /// nomeia. Sem esta saída a suíte apagaria o `AutoRun` de quem roda os testes —
