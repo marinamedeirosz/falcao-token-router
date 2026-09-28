@@ -13,9 +13,13 @@
 //!   para o perfil real é seguido, não substituído;
 //! - arquivo que existe e não pode ser lido faz a operação falhar — nunca vira
 //!   "vazio".
+//!
+//! A remoção ([`remove_block`]) é a única que reescreve, e mesmo ela só APAGA
+//! faixas de bytes: o que fica sai igual ao que entrou, em qualquer codificação.
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+use std::ops::Range;
 use std::path::Path;
 
 use super::atomic_write::{read_retrying, retrying};
@@ -153,8 +157,81 @@ pub fn append_block(
 /// trocá-lo. Por isso a remoção grava **no lugar** (truncate + write) e nunca
 /// por `write_atomic`: o rename por cima substituiria o link pelo arquivo novo.
 /// Arquivo ilegível continua sendo erro, nunca "vazio".
+pub fn remove_block(path: &Path, marker: &str) -> io::Result<RemoveOutcome> {
+    let bytes = match read_retrying(path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(RemoveOutcome::NotPresent),
+        Err(e) => return Err(e),
+    };
+
+    let (encoding, body) = detect(&bytes);
+    let needle = marker.to_lowercase();
+    if !decode(encoding, body).to_lowercase().contains(&needle) {
+        return Ok(RemoveOutcome::NotPresent);
+    }
+    let line = |range: &Range<usize>| decode(encoding, &body[range.clone()]);
+
+    let mut kept: Vec<Range<usize>> = Vec::new();
+    for range in line_ranges(encoding, body) {
+        if !line(&range).to_lowercase().contains(&needle) {
+            kept.push(range);
+            continue;
+        }
+        // O comentário do bloco sai junto com a linha, e com ele a linha em
+        // branco que o `append_block` põe antes — só ela: as do usuário ficam.
+        if matches!(kept.last(), Some(r) if is_block_comment(&line(r))) {
+            kept.pop();
+            if matches!(kept.last(), Some(r) if line(r).trim().is_empty()) {
+                kept.pop();
+            }
+        }
+    }
+
+    // O BOM é o que `detect` tirou da frente e continua onde estava.
+    let mut out = bytes[..bytes.len() - body.len()].to_vec();
+    for range in kept {
+        out.extend_from_slice(&body[range]);
+    }
+
+    let mut file = retrying(|| OpenOptions::new().write(true).truncate(true).open(path))?;
+    file.write_all(&out)?;
+    file.sync_all()?;
+    Ok(RemoveOutcome::Removed)
+}
+
+/// As linhas do corpo em FAIXAS DE BYTES, cada uma com o próprio fim de linha
+/// (daí o CRLF ou LF do arquivo sobreviver sem ninguém decidir nada).
 ///
-/// TRILHA T2: implementar reusando `detect`/`decode`/`encode`.
-pub fn remove_block(_path: &Path, _marker: &str) -> io::Result<RemoveOutcome> {
-    Ok(RemoveOutcome::NotPresent)
+/// Cortar por byte, e não pelo texto decodificado, é o que preserva o que não é
+/// ASCII: um perfil ANSI com "café" decodifica COM PERDA (o 0xE9 vira �) e
+/// reescrevê-lo a partir do texto estragaria o arquivo do usuário.
+fn line_ranges(encoding: Encoding, body: &[u8]) -> Vec<Range<usize>> {
+    let newline: &[u8] = match encoding {
+        Encoding::Utf16Le => &[0x0A, 0x00],
+        Encoding::Utf16Be => &[0x00, 0x0A],
+        Encoding::Utf8Bom | Encoding::Plain => &[0x0A],
+    };
+    let unit = newline.len();
+
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at + unit <= body.len() {
+        if &body[at..at + unit] == newline {
+            ranges.push(start..at + unit);
+            start = at + unit;
+        }
+        at += unit;
+    }
+    if start < body.len() {
+        ranges.push(start..body.len()); // a última linha, sem quebra no fim
+    }
+    ranges
+}
+
+/// A linha é o comentário que acompanha o nosso bloco? Ele é ASCII e nomeia o
+/// produto (`# Falcao Router - ...`), então comentário do usuário não some.
+fn is_block_comment(line: &str) -> bool {
+    let line = line.trim_start();
+    line.starts_with('#') && line.to_lowercase().contains("falcao")
 }
