@@ -139,61 +139,27 @@ fn resume(pid: u32) -> io::Result<()> {
 /// Para os testes de quem sobe processos: ver a árvore pela lista do sistema.
 #[cfg(test)]
 pub(crate) mod test_support {
+    // A enumeração `(pid, ppid, exe)` nasceu aqui, mas quem precisa dela de
+    // verdade é o `process_tree` (o `doctor` tem de saber em que shell o usuário
+    // está). Ela mudou de casa e virou produção; aqui fica só o uso.
     use crate::platform::process_times::{probe, ProcessState};
+    use crate::platform::process_tree::processes;
     use std::thread;
     use std::time::{Duration, Instant};
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-
-    /// `(pid, pid do pai, nome do exe)` de cada processo vivo.
-    pub fn processes() -> Vec<(u32, u32, String)> {
-        // SAFETY: foto da lista de processos; o handle é fechado no fim.
-        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        if snapshot == INVALID_HANDLE_VALUE {
-            return Vec::new();
-        }
-        let mut entry = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
-        };
-        let mut all = Vec::new();
-        // SAFETY: `entry` é nosso, com o `dwSize` preenchido.
-        let mut more = unsafe { Process32FirstW(snapshot, &mut entry) } != 0;
-        while more {
-            let len = entry
-                .szExeFile
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(entry.szExeFile.len());
-            all.push((
-                entry.th32ProcessID,
-                entry.th32ParentProcessID,
-                String::from_utf16_lossy(&entry.szExeFile[..len]),
-            ));
-            // SAFETY: idem.
-            more = unsafe { Process32NextW(snapshot, &mut entry) } != 0;
-        }
-        // SAFETY: o handle é nosso.
-        unsafe { CloseHandle(snapshot) };
-        all
-    }
 
     /// O filho `exe` de `parent`.
     pub fn child_of(parent: u32, exe: &str) -> Option<u32> {
         processes()
             .into_iter()
-            .find(|(_, p, name)| *p == parent && name.eq_ignore_ascii_case(exe))
-            .map(|(pid, _, _)| pid)
+            .find(|entry| entry.parent == parent && entry.exe.eq_ignore_ascii_case(exe))
+            .map(|entry| entry.pid)
     }
 
     /// Algum processo com esse exe está vivo?
     pub fn running(exe: &str) -> bool {
         processes()
             .iter()
-            .any(|(_, _, name)| name.eq_ignore_ascii_case(exe))
+            .any(|entry| entry.exe.eq_ignore_ascii_case(exe))
     }
 
     pub fn within<T>(limit: Duration, mut check: impl FnMut() -> Option<T>) -> Option<T> {
