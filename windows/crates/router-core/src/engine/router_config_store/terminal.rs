@@ -25,6 +25,16 @@ impl RouterConfigStore {
         self.paths.base.join("shell.sh")
     }
 
+    /// O `shell.cmd` que o `AutoRun` do Prompt de Comando carrega.
+    ///
+    /// Mora na pasta de DADOS, não na de instalação, e é de propósito: o
+    /// desinstalador não apaga esta pasta, então o script sobrevive e a guarda
+    /// `if not exist` dentro dele mantém o terminal limpo quando o `router.exe`
+    /// some.
+    pub fn cmd_script_path(&self) -> PathBuf {
+        self.paths.base.join("shell.cmd")
+    }
+
     /// A status line que o perfil de um grupo deve ter, para o shell que o
     /// Claude Code vai usar.
     pub fn expected_status_line(&self, group: &AccountGroup, shell: StatusShell) -> Option<String> {
@@ -48,10 +58,14 @@ impl RouterConfigStore {
             self.last_error = Some(StoreError::RouterPathUnknown);
             return Err(StoreError::RouterPathUnknown);
         };
-        let (ps1, sh) = (self.powershell_script_path(), self.bash_script_path());
+        let (ps1, sh, cmd) = (
+            self.powershell_script_path(),
+            self.bash_script_path(),
+            self.cmd_script_path(),
+        );
         let mut failures: Vec<String> = Vec::new();
 
-        if let Err(e) = ShellIntegration::write_scripts(&router, &ps1, &sh) {
+        if let Err(e) = ShellIntegration::write_scripts(&router, &ps1, &sh, &cmd) {
             failures.push(e.to_string());
         }
         let home = ConfigDir::standard(&self.home);

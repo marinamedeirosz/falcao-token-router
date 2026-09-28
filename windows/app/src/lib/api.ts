@@ -107,6 +107,13 @@ export const installIntegration = () => call<InstallResult>("install_integration
 /** RemoteSigned no escopo do usuário, na edição que bloqueava (com confirmação). */
 export const allowProfilesFor = (shell: ShellName) =>
   call<TerminalView>("allow_profiles_for", { shell });
+/** "Ativar no cmd": escreve o AutoRun do Prompt de Comando (com confirmação —
+ *  é um valor global do usuário). */
+export const enableCmdIntegration = () => call<TerminalView>("enable_cmd_integration");
+/** "Desativar no cmd": tira só o nosso segmento do AutoRun. */
+export const disableCmdIntegration = () => call<TerminalView>("disable_cmd_integration");
+/** "Diagnosticar": a saída crua do `router doctor` (pt-BR fixo, texto técnico). */
+export const runDoctor = () => call<string>("run_doctor");
 
 // MARK: - Ajustes
 

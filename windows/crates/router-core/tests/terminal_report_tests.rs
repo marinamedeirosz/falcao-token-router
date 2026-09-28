@@ -166,7 +166,7 @@ fn scripts_are_missing_current_or_stale() {
         ScriptsState::Missing
     );
 
-    ShellIntegration::write_scripts(&router, &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(&router, &ps1, &sh, &tmp.path().join("shell.cmd")).unwrap();
     assert_eq!(
         scripts_state(&ps1, &sh, &router, true),
         ScriptsState::Current
@@ -199,7 +199,7 @@ fn the_report_covers_each_shell_present() {
     let router = PathBuf::from(r"C:\Users\exemplo\AppData\Local\FalcaoTokenRouter\router.exe");
     let git_bash = PathBuf::from(r"C:\Program Files\Git\bin\bash.exe");
 
-    ShellIntegration::write_scripts(&router, &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(&router, &ps1, &sh, &base.join("shell.cmd")).unwrap();
     // Só o perfil do 5.1 recebeu a linha — e ele já tinha uma `function claude`.
     let ps51_profile = documents.join(r"WindowsPowerShell\Microsoft.PowerShell_profile.ps1");
     fs::create_dir_all(ps51_profile.parent().unwrap()).unwrap();
@@ -235,7 +235,7 @@ fn the_report_covers_each_shell_present() {
     assert!(ps51.chains_user_function);
     assert_eq!(ps51.policy.as_deref(), Some("Restricted"));
     assert!(ps51.policy_blocks);
-    assert_eq!(ps51.profile, ps51_profile);
+    assert_eq!(ps51.profiles, vec![ps51_profile]);
 
     let pwsh = report.shell(ShellKind::PowerShell7).unwrap();
     assert!(!pwsh.loads_integration);
@@ -244,7 +244,7 @@ fn the_report_covers_each_shell_present() {
 
     let bash = report.shell(ShellKind::GitBash).unwrap();
     assert!(!bash.loads_integration);
-    assert_eq!(bash.profile, home.join(".bashrc"));
+    assert_eq!(bash.profiles, vec![home.join(".bashrc")]);
     assert_eq!(bash.bash_login, Some(BashLogin::Missing));
 
     assert_eq!(
@@ -269,7 +269,7 @@ fn without_git_bash_the_report_has_only_powershell() {
     let (ps1, sh) = (base.join("shell.ps1"), base.join("shell.sh"));
     let router = PathBuf::from(r"C:\Users\exemplo\AppData\Local\FalcaoTokenRouter\router.exe");
 
-    ShellIntegration::write_scripts(&router, &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(&router, &ps1, &sh, &base.join("shell.cmd")).unwrap();
     for profile in &targets.powershell_profiles {
         ShellIntegration::ensure_in_profile(
             profile,

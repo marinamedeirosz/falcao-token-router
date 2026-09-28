@@ -27,6 +27,12 @@ pub enum AppendOutcome {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RemoveOutcome {
+    Removed,
+    NotPresent,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Encoding {
     Utf8Bom,
     Utf16Le,
@@ -73,6 +79,17 @@ fn encode(encoding: Encoding, text: &str) -> Vec<u8> {
         Encoding::Utf16Be => text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
         Encoding::Utf8Bom | Encoding::Plain => text.as_bytes().to_vec(),
     }
+}
+
+/// O texto de um perfil, seja qual for a codificação em que ele foi salvo.
+///
+/// **Esta é a única leitura de BOM que se deve usar.** Havia três cópias dela no
+/// repositório e só esta trata UTF-16**BE**: num perfil salvo assim, as outras
+/// duas não achavam o marcador e o botão "Ativar" nunca ficava verde, por mais
+/// que o usuário clicasse.
+pub fn decode_profile(bytes: &[u8]) -> String {
+    let (encoding, body) = detect(bytes);
+    decode(encoding, body)
 }
 
 /// Acrescenta `lines` ao arquivo se `marker` ainda não está nele (sem caixa).
@@ -126,4 +143,18 @@ pub fn append_block(
     file.write_all(&payload)?;
     file.sync_all()?;
     Ok(AppendOutcome::Added)
+}
+
+/// Tira do arquivo as linhas do nosso bloco (as que citam `marker`, e o
+/// comentário imediatamente antes), preservando o resto na codificação original.
+///
+/// O `append_block` ganhava de graça uma garantia que a remoção não tem: abrindo
+/// em modo append, ele **segue** um `$PROFILE` que é link simbólico em vez de
+/// trocá-lo. Por isso a remoção grava **no lugar** (truncate + write) e nunca
+/// por `write_atomic`: o rename por cima substituiria o link pelo arquivo novo.
+/// Arquivo ilegível continua sendo erro, nunca "vazio".
+///
+/// TRILHA T2: implementar reusando `detect`/`decode`/`encode`.
+pub fn remove_block(_path: &Path, _marker: &str) -> io::Result<RemoveOutcome> {
+    Ok(RemoveOutcome::NotPresent)
 }
