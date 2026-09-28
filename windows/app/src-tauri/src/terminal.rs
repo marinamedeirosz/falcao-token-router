@@ -7,15 +7,19 @@
 //! O quadro consulta a política de cada PowerShell (abre um processo por
 //! edição): roda fora da thread da interface.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Duration;
 
-use router_core::engine::shell_integration::{ShellTargets, StatusShell};
+use router_core::engine::shell_integration::{ShellIntegration, ShellTargets, StatusShell};
 use router_core::engine::terminal_report::{
     allow_profiles, effective_policy, powershell_editions, BashLogin, EditionEnv, ScriptsState,
     ShellKind, TerminalReport,
 };
+use router_core::platform::command_processor::{self, CommandProcessorKey};
 use router_core::platform::git_bash::{find_git_bash, GitBashEnv};
 use router_core::platform::links::developer_mode_enabled;
+use router_core::platform::process::run_with_timeout;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
@@ -229,45 +233,133 @@ pub async fn allow_profiles_for(app: AppHandle, shell: ShellName) -> Result<Term
     .map_err(|e| e.to_string())
 }
 
+/// Sem o caminho do `router.exe` não há nem integração nem diagnóstico — e o
+/// motivo é sempre o mesmo, então a frase também.
+const NO_ROUTER: &str = "o app não sabe onde está o router.exe";
+
+/// O que marca o NOSSO segmento dentro do `AutoRun`. Cópia do `SHIM_MARKER` do
+/// motor, que é privado nos dois módulos que o usam: o quadro lê o registro
+/// procurando EXATAMENTE este texto, então um marcador diferente daria um
+/// "Ativar no cmd" que grava e nunca acende, e um "Desativar" sem nada que tirar.
+/// Se mudar lá, muda aqui (o certo é o motor exportá-lo — ver pendências).
+const SHIM_MARKER: &str = "falcao-router-shim";
+
+/// A linha que o `cmd.exe` roda antes do primeiro prompt.
+///
+/// O caminho vai entre aspas porque a pasta de dados pode ter espaço, e o
+/// marcador entra como ARGUMENTO, no mesmo segmento: o quadro reconhece a
+/// integração procurando o marcador no valor do `AutoRun`, e o caminho sozinho
+/// não o contém. Argumento, e não um `& rem <marcador>`, porque um segmento
+/// separado seria o único a sair na remoção — deixando a chamada do script órfã
+/// no registro. O `shell.cmd` não lê `%1`, então o extra é inerte.
+fn autorun_call(script: &Path) -> String {
+    format!("\"{}\" {SHIM_MARKER}", script.display())
+}
+
+/// O `shell.cmd` no disco, gravando-o se faltar.
+///
+/// O AutoRun tem de apontar para um arquivo que EXISTE: caminho morto faz o cmd
+/// reclamar a cada janela aberta, que é justamente o barulho que a integração
+/// existe para evitar. Grava só os scripts, em vez de chamar a instalação
+/// inteira: o botão do cmd mexe no cmd — acrescentar a linha no `$PROFILE` do
+/// usuário daqui seria efeito que ninguém pediu.
+fn ensure_cmd_script(app: &AppHandle) -> Result<PathBuf, String> {
+    let state = app.state::<AppState>();
+    let store = state.store();
+    let cmd = store.cmd_script_path();
+    if cmd.is_file() {
+        return Ok(cmd);
+    }
+    let Some(router) = store.router_path() else {
+        return Err(NO_ROUTER.to_string());
+    };
+    ShellIntegration::write_scripts(
+        router,
+        &store.powershell_script_path(),
+        &store.bash_script_path(),
+        &cmd,
+    )
+    .map_err(|e| format!("não foi possível gravar o {}: {e}", cmd.display()))?;
+    Ok(cmd)
+}
+
 /// "Ativar no cmd": escreve o `AutoRun` do Prompt de Comando.
 ///
 /// É opt-in por botão próprio, e não parte do "Ativar" geral, porque o `AutoRun`
 /// é um valor GLOBAL do usuário — roda em toda invocação de `cmd.exe`, inclusive
 /// as que scripts de terceiros disparam. Mexer nele é escolha explícita, como o
 /// "Permitir" da política de execução já é.
-///
-/// TRILHA T11: `command_processor::install` com o caminho do `shell.cmd`.
 #[tauri::command]
 pub async fn enable_cmd_integration(app: AppHandle) -> Result<TerminalView, String> {
-    tauri::async_runtime::spawn_blocking(move || build(&app))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let script = ensure_cmd_script(&app)?;
+        command_processor::install(
+            &CommandProcessorKey::current_user(),
+            &autorun_call(&script),
+            SHIM_MARKER,
+        )
+        .map_err(|e| format!("não foi possível escrever o AutoRun do Prompt de Comando: {e}"))?;
+        Ok(build(&app))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// "Desativar no cmd": tira só o NOSSO segmento do `AutoRun`, preservando o de
 /// quem mais estiver lá (clink, ConEmu, Anaconda).
 ///
-/// TRILHA T11: `command_processor::remove`.
+/// O `shell.cmd` fica onde está: ele é inerte sem o AutoRun, e apagá-lo tiraria
+/// do disco um arquivo que o "Ativar" geral também grava.
 #[tauri::command]
 pub async fn disable_cmd_integration(app: AppHandle) -> Result<TerminalView, String> {
-    tauri::async_runtime::spawn_blocking(move || build(&app))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        command_processor::remove(&CommandProcessorKey::current_user(), SHIM_MARKER)
+            .map_err(|e| format!("não foi possível limpar o AutoRun do Prompt de Comando: {e}"))?;
+        Ok(build(&app))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
+
+/// O prazo do `doctor`: ele roda o sensor de verdade e abre um PowerShell por
+/// edição — em máquina fria passa de um minuto. O prazo está aqui para a tela
+/// não ficar presa para sempre, não para apertar o diagnóstico.
+const DOCTOR_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// "Diagnosticar": roda o próprio `router.exe doctor` e devolve a saída crua.
 ///
-/// O diagnóstico era inalcançável para quem mais precisava dele: o app não o
-/// expunha, o `router.exe` não está no PATH, e a linha do README é sintaxe de
-/// PowerShell — que dá erro justamente no cmd. Sobe o binário em vez de
-/// refatorar o `Report`, que hoje imprime direto no stdout.
+/// O diagnóstico era inalcançável justamente para quem tem o problema: o app não
+/// o expunha em lugar nenhum, o `router.exe` não está no PATH, e a única
+/// invocação documentada é sintaxe de PowerShell — que dá erro no cmd, o shell
+/// do usuário afetado. Sobe o binário em vez de refatorar o `Report`, que hoje
+/// imprime direto no stdout.
 ///
-/// A saída é pt-BR fixo, como a da CLI: é texto técnico, não string de catálogo.
-///
-/// TRILHA T11: `run_with_timeout` sobre `store.router_path()` com `doctor`.
+/// A saída é pt-BR fixo, como a da CLI: é texto técnico, não string de catálogo
+/// — não traduzir.
 #[tauri::command]
-pub async fn run_doctor(_app: AppHandle) -> Result<String, String> {
-    Err("ainda não implementado".to_string())
+pub async fn run_doctor(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let router = {
+            let state = app.state::<AppState>();
+            let store = state.store();
+            store.router_path().map(Path::to_path_buf)
+        }
+        .ok_or_else(|| NO_ROUTER.to_string())?;
+        let mut command = Command::new(&router);
+        command.arg("doctor");
+        // A saída volta mesmo com código != 0: o `doctor` sai com 1 QUANDO acha
+        // problema, e é exatamente aí que o texto importa.
+        let (_code, out) = run_with_timeout(command, None, DOCTOR_TIMEOUT).ok_or_else(|| {
+            format!(
+                "o diagnóstico não respondeu em {}s ({})",
+                DOCTOR_TIMEOUT.as_secs(),
+                router.display()
+            )
+        })?;
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -365,6 +457,27 @@ mod tests {
         let v = view(&report(ScriptsState::Current, vec![bash]), true);
         assert_eq!(v.shells[0].bash_login_file, None);
         assert!(v.fully_installed);
+    }
+
+    /// O que vai para o `AutoRun`: caminho entre aspas (a pasta de dados pode
+    /// ter espaço) e o marcador no MESMO segmento. Sem o marcador o quadro
+    /// nunca acenderia a linha do cmd; num segmento à parte, a remoção levaria
+    /// só ele e deixaria a chamada do script órfã no registro.
+    #[test]
+    fn the_autorun_call_quotes_the_script_and_carries_the_marker() {
+        let call = autorun_call(Path::new(
+            r"C:\Users\exemplo\Pasta com espaco\com.synqo.falcao-router\shell.cmd",
+        ));
+        // O marcador literal, e não a constante: mudá-la sem mudar a do motor é
+        // o defeito que este teste existe para pegar.
+        assert_eq!(
+            call,
+            "\"C:\\Users\\exemplo\\Pasta com espaco\\com.synqo.falcao-router\\shell.cmd\" falcao-router-shim"
+        );
+        assert!(
+            !call.contains('&'),
+            "segmento único: o & separaria o marcador"
+        );
     }
 
     /// Sem saber onde está o `router.exe` não há integração, diga o disco o que
