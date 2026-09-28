@@ -10,7 +10,7 @@ apps, reading and writing the same files. A group you set up on one means the
 same thing on the other.
 
 ```
-◐ 81%  equipe-2   ← which account is serving you, and how much of it is spent
+◐ 81%  conta2   ← which account is serving you, and how much of it is spent
 ```
 
 ## What it does
@@ -95,9 +95,9 @@ or `router measure [group]`:
 
 ```
 $ router measure trabalho
-  equipe-1: 5h 2%   7d 3%    Fable 0%
-  equipe-2: 5h 26%  7d 38%   Fable 0%
-  equipe-3: 5h 10%  7d 70%   Fable 0%
+  conta1: 5h 2%   7d 3%    Fable 0%
+  conta2: 5h 26%  7d 38%   Fable 0%
+  conta3: 5h 10%  7d 70%   Fable 0%
 ```
 
 It asks the official binary (`claude --print /usage`) — the same thing that
