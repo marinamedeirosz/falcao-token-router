@@ -253,6 +253,17 @@ impl RotationEngine {
     /// Com histerese: só troca se a conta ativa passou do limiar **e** existe um
     /// destino melhor. Com a ativa abaixo do limiar, fica onde está mesmo que
     /// outra esteja mais folgada — trocar por pouco só reconstrói cache à toa.
+    ///
+    /// Trocar exige **prova** de que a ativa estourou. Sem amostra não há prova,
+    /// e não trocar é sempre o erro mais barato: a conta escolhida à mão fica.
+    /// Antes daqui, a ativa sem amostra caía fora do teste de folga e o motor
+    /// pulava para a primeira da ordem — bastava a pessoa ativar uma conta que
+    /// ainda não tinha servido, e na volta seguinte do laço (3 min) a escolha
+    /// dela era desfeita sozinha, sem nada na tela explicando por quê.
+    ///
+    /// Grupo SEM conta ativa é outro caso, e o oposto: aí escolher a primeira é
+    /// justamente o que se quer, e por isso o teste é sobre a ativa existir, não
+    /// sobre a amostra dela existir.
     pub fn rotation_target<'c>(
         &self,
         group: &AccountGroup,
@@ -265,7 +276,9 @@ impl RotationEngine {
         let threshold = group.threshold_percent / 100.0;
         let active = self.active_account(group, config);
 
-        if let Some(used) = active.and_then(|a| usage.get(&a.id)) {
+        if let Some(active) = active {
+            // Sem medição da ativa, o motor não sabe de nada: fica como está.
+            let used = usage.get(&active.id)?;
             if *used < threshold {
                 return None; // ativa ainda tem folga; não mexe
             }

@@ -421,6 +421,36 @@ fn an_active_account_without_a_sample_stays_put() {
     assert!(target.is_none());
 }
 
+/// A escolha manual sobrevive ao laço de rotação.
+///
+/// Ativar à mão uma conta que ainda não serviu — e por isso não tem amostra —
+/// não pode fazer o motor pular para a primeira da ordem na volta seguinte do
+/// laço (3 min depois). O teste acima não pegava isto porque lá a ativa JÁ era a
+/// primeira: `next_account` devolvia ela mesma e o desvio morria na comparação
+/// final, por acidente. Com a ativa na SEGUNDA posição o defeito aparece — a
+/// ativa sem amostra escapava do teste de folga, e `next_account`, que presume
+/// fresca quem não tem medição, entregava a primeira.
+#[test]
+fn a_manually_chosen_account_without_a_sample_is_not_undone() {
+    let s = setup();
+    s.engine.activate(&s.b, &s.group, &s.config).unwrap();
+    assert_eq!(
+        s.engine.active_account(&s.group, &s.config).map(|x| x.id),
+        Some(s.b.id),
+        "o cenário exige a ativa fora da primeira posição"
+    );
+
+    // Só a PRIMEIRA da ordem tem medição, e com folga de sobra.
+    let target = s
+        .engine
+        .rotation_target(&s.group, &s.config, &usage(&[(s.a.id, 0.1)]));
+
+    assert!(
+        target.is_none(),
+        "sem medição da ativa não há prova de estouro: a escolha do usuário fica"
+    );
+}
+
 /// A preferência é a ordem do grupo: a primeira com folga, não a mais folgada.
 #[test]
 fn the_next_account_follows_the_preference_order() {
