@@ -129,8 +129,17 @@ fn view(report: &TerminalReport, router_found: bool) -> TerminalView {
         developer_mode: report.developer_mode,
         fully_installed: router_found && report.fully_installed(),
         blocked_by_policy: report.blocked_by_policy(),
+        // O cmd fica de fora, como no `fully_installed` do núcleo e pela mesma
+        // razão: a integração dele é um valor GLOBAL do usuário no registro, e
+        // por isso tem botão próprio, com confirmação. Contá-lo aqui deixaria o
+        // "Ativar" aceso para sempre em quem não optou por ela — e o botão
+        // prometeria o que não faz, porque instalar não escreve o AutoRun.
         needs_install: report.scripts != ScriptsState::Current
-            || report.shells.iter().any(|s| !s.loads_integration),
+            || report
+                .shells
+                .iter()
+                .filter(|s| s.kind != ShellKind::Cmd)
+                .any(|s| !s.loads_integration),
     }
 }
 
@@ -327,6 +336,29 @@ mod tests {
         let installed = view(&report(ScriptsState::Current, both_powershells(true)), true);
         assert!(!installed.needs_install);
         assert!(installed.fully_installed);
+    }
+
+    /// O cmd desligado NÃO acende o "Ativar".
+    ///
+    /// A linha do Prompt de Comando está sempre no quadro (não existe Windows
+    /// sem `cmd.exe`), e a integração dele quase nunca começa ligada — é um
+    /// valor global do registro, com botão e confirmação próprios. Contá-la aqui
+    /// deixaria o "Ativar" aceso para sempre, prometendo o que ele não faz:
+    /// `install_shell_integration` escreve scripts e linhas de perfil, nunca o
+    /// AutoRun.
+    #[test]
+    fn the_cmd_row_does_not_light_up_the_activate_button() {
+        let mut shells = both_powershells(true);
+        shells.push(shell(ShellKind::Cmd, false));
+
+        let v = view(&report(ScriptsState::Current, shells.clone()), true);
+        assert!(!v.needs_install, "o cmd desligado não é problema do Ativar");
+        assert!(v.fully_installed, "nem impede a integração de estar pronta");
+
+        // Mas um PowerShell sem a linha continua acendendo: o que "Ativar"
+        // resolve, ele tem de oferecer.
+        shells[0].loads_integration = false;
+        assert!(view(&report(ScriptsState::Current, shells), true).needs_install);
     }
 
     /// A política que bloqueia o perfil tem correção própria ("Permitir"):
