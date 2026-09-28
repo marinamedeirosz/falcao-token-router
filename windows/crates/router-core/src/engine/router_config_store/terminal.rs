@@ -3,6 +3,13 @@
 //! Parte do `impl RouterConfigStore` — ver o `mod.rs` ao lado.
 
 use super::*;
+use crate::platform::command_processor::{self, CommandProcessorKey};
+
+/// O que identifica o NOSSO segmento no `AutoRun` — o mesmo marcador que os
+/// scripts carregam. Repetido aqui (como no `terminal_report`) porque no
+/// `shell_integration` ele é privado ao módulo; divergindo os três, a tela
+/// diria "não instalada" com o `AutoRun` no lugar.
+const SHIM_MARKER: &str = "falcao-router-shim";
 
 impl RouterConfigStore {
     // MARK: - Integração com o terminal
@@ -108,21 +115,89 @@ impl RouterConfigStore {
         }
     }
 
+    /// Liga a integração do Prompt de Comando: o `AutoRun` do usuário passa a
+    /// carregar o `shell.cmd`, e aí `claude <grupo>` funciona no cmd.
+    ///
+    /// Fora do `install_shell_integration` de propósito. O `AutoRun` é um valor
+    /// GLOBAL do usuário — clink, ConEmu e Anaconda escrevem no mesmo lugar — e
+    /// roda em TODA invocação de `cmd.exe`, inclusive as que npm, MSBuild e as
+    /// tarefas do VS Code disparam. Mexer nele é escolha explícita, com botão e
+    /// confirmação próprios; é por isso que `fully_installed` e `needs_install`
+    /// já ignoram a linha do cmd. O `shell.cmd` em si o "Ativar" geral já
+    /// gravou (`write_scripts`), então o alvo existe antes de o AutoRun apontar.
+    pub fn enable_cmd_integration(&mut self) -> Result<(), StoreError> {
+        self.enable_cmd_integration_with(&CommandProcessorKey::current_user())
+    }
+
+    /// Idem, com a chave injetada — os testes escrevem sob uma subchave própria.
+    pub fn enable_cmd_integration_with(
+        &mut self,
+        key: &CommandProcessorKey,
+    ) -> Result<(), StoreError> {
+        // O caminho vai entre aspas (a pasta de dados pode ter espaço) e o
+        // marcador vai JUNTO, como argumento que o `shell.cmd` ignora: é ele
+        // que identifica o nosso segmento na hora de tirar, e é ele que a tela
+        // procura para dizer "instalada". O caminho sozinho não serviria — a
+        // pasta de dados se chama `com.synqo.falcao-router`, que NÃO contém o
+        // marcador, e sem reconhecê-lo cada clique somaria um segmento igual.
+        let call = format!("\"{}\" {SHIM_MARKER}", self.cmd_script_path().display());
+        let done = command_processor::install(key, &call, SHIM_MARKER).map(|_| ());
+        self.record_integration(done)
+    }
+
+    /// Desliga: tira SÓ o nosso segmento do `AutoRun`, preservando o de quem
+    /// mais estiver lá.
+    pub fn disable_cmd_integration(&mut self) -> Result<(), StoreError> {
+        self.disable_cmd_integration_with(&CommandProcessorKey::current_user())
+    }
+
+    /// Idem, com a chave injetada.
+    pub fn disable_cmd_integration_with(
+        &mut self,
+        key: &CommandProcessorKey,
+    ) -> Result<(), StoreError> {
+        let done = command_processor::remove(key, SHIM_MARKER).map(|_| ());
+        self.record_integration(done)
+    }
+
+    /// Guarda a falha para a UI mostrar, como as outras ações do store fazem.
+    fn record_integration(&mut self, done: io::Result<()>) -> Result<(), StoreError> {
+        done.map_err(|e| {
+            let error = StoreError::IntegrationFailed(e.to_string());
+            self.last_error = Some(error.clone());
+            error
+        })
+    }
+
     /// A integração instalada aponta para um binário que não é mais este (app
     /// movido ou reinstalado noutro lugar), ou algum perfil de grupo está sem a
-    /// status line certa. O modo de falha é silencioso — `claude trabalho` cai
-    /// no `claude` puro, na conta errada — por isso a cura é automática.
+    /// status line certa, ou algum dos três scripts é de outra versão. O modo
+    /// de falha é silencioso — `claude trabalho` cai no `claude` puro, na conta
+    /// errada — por isso a cura é automática.
     /// Não instalada não é obsoleta: é ausente.
     pub fn integration_is_stale(&self, shell: StatusShell) -> bool {
         let Some(router) = self.router_path.as_deref() else {
             return false;
         };
         let ps1 = self.powershell_script_path();
-        let Ok(script) = read_retrying(&ps1) else {
+        // Ausente não é obsoleto, e o `shell.ps1` é a âncora dessa pergunta:
+        // sem ele nunca houve instalação, e "curar" seria instalar no lugar de
+        // quem não pediu (a cura roda sozinha na subida do app).
+        if read_retrying(&ps1).is_err() {
             return false;
-        };
-        let router_text = router.to_string_lossy().replace('\'', "''");
-        if !String::from_utf8_lossy(&script).contains(router_text.as_str()) {
+        }
+        let expected = [
+            (ps1, ShellIntegration::powershell_script(router)),
+            (
+                self.bash_script_path(),
+                ShellIntegration::bash_script(router),
+            ),
+            (self.cmd_script_path(), ShellIntegration::cmd_script(router)),
+        ];
+        if expected
+            .iter()
+            .any(|(path, text)| !script_is_current(path, text))
+        {
             return true;
         }
         self.config.groups.iter().any(|group| {
@@ -135,4 +210,31 @@ impl RouterConfigStore {
     pub fn heal_shell_integration(&mut self, targets: &ShellTargets, shell: StatusShell) -> bool {
         self.integration_is_stale(shell) && self.install_shell_integration(targets, shell).is_ok()
     }
+}
+
+/// O script no disco é o que ESTA versão geraria?
+///
+/// Comparar conteúdo, e não "o script cita o caminho do router", é o que faz um
+/// conserto no shim chegar a quem já instalou: a pasta de instalação não muda
+/// entre versões, então o script ANTIGO cita o mesmo caminho e passaria por
+/// atual para sempre — a cura na subida não fazia nada e a tela dizia
+/// "Instalada" com o script velho no disco. É exato, dispensa numerar versão, e
+/// é o mesmo padrão do `install_status_line`, que compara o valor inteiro.
+fn script_is_current(path: &Path, expected: &str) -> bool {
+    let Ok(bytes) = read_retrying(path) else {
+        // Conteúdo vazio não vira arquivo (ver `write_scripts`): aí o ausente é
+        // o estado certo, e não um script obsoleto.
+        return expected.is_empty();
+    };
+    normalize(&String::from_utf8_lossy(&bytes)) == normalize(expected)
+}
+
+/// Sem BOM e com LF. O `shell.ps1` é gravado em UTF-8 COM BOM e CRLF e o
+/// `shell.cmd` em CRLF, enquanto o gerador devolve LF puro: comparar cru
+/// acusaria diferença que só existe na codificação, e a integração seria
+/// reinstalada a cada subida do app.
+fn normalize(text: &str) -> String {
+    text.strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .replace("\r\n", "\n")
 }
