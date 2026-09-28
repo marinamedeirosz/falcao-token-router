@@ -9,10 +9,31 @@
 //! com o ambiente INTOCADO (sem `CLAUDE_CONFIG_DIR`), para o `claude` puro do
 //! cmd se comportar exatamente como se o router não existisse.
 
-/// TRILHA T4: `launch::is_group(argv.first())` → `launch::run(argv)`; senão
-/// `ClaudeBinary::locate()` e roda com o ambiente herdado, saindo com o código
-/// do filho (o padrão de `launch.rs`, inclusive o `ignore_interrupts_in_this_process`).
-pub fn run(_argv: &[String]) {
-    eprintln!("router shim: ainda não implementado");
-    std::process::exit(2);
+use router_core::platform::console;
+use router_core::usage::claude_binary::ClaudeBinary;
+
+use crate::launch;
+use crate::shared::fail;
+
+pub fn run(argv: &[String]) {
+    // Mesma regra do `is-group` que a função de shell consulta: sem caixa e sem
+    // espaço nas pontas. `launch::run` faz o resto (trava, ativação, sensor,
+    // ambiente, código de saída) e não volta.
+    if launch::is_group(argv.first().map(String::as_str)) {
+        launch::run(argv);
+        return;
+    }
+
+    let Some(claude) = ClaudeBinary::locate() else {
+        fail("não foi possível executar claude: binário não encontrado");
+    };
+    // Sem `env_clear`, sem tirar nem pôr `CLAUDE_CONFIG_DIR`: quem digitou
+    // `claude` puro no cmd tem de receber a sessão que receberia sem o router —
+    // inclusive dentro de um perfil que já esteja no ambiente.
+    console::ignore_interrupts_in_this_process();
+    match claude.command().args(argv).status() {
+        // O Windows não tem `exec`: o router espera o filho e devolve o código.
+        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+        Err(e) => fail(&format!("não foi possível executar claude: {e}")),
+    }
 }
