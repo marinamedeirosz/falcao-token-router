@@ -9,7 +9,7 @@ use router_core::engine::shell_integration::{ShellIntegration, ShellTargets};
 use router_core::engine::terminal_report::{
     bash_login_profile, defines_claude_function, parse_policy_list, policy_blocks_profiles,
     powershell_editions, scripts_state, BashLogin, EditionEnv, ScriptsState, ShellKind,
-    TerminalReport,
+    ShellReport, TerminalReport,
 };
 
 fn touch(path: &Path) {
@@ -228,7 +228,7 @@ fn the_report_covers_each_shell_present() {
 
     assert_eq!(report.scripts, ScriptsState::Current);
     assert!(!report.developer_mode);
-    assert_eq!(report.shells.len(), 3, "5.1, 7 e Git Bash");
+    assert_eq!(report.shells.len(), 4, "5.1, 7, Git Bash e o cmd");
 
     let ps51 = report.shell(ShellKind::WindowsPowerShell).unwrap();
     assert!(ps51.loads_integration);
@@ -247,6 +247,15 @@ fn the_report_covers_each_shell_present() {
     assert_eq!(bash.profiles, vec![home.join(".bashrc")]);
     assert_eq!(bash.bash_login, Some(BashLogin::Missing));
 
+    // O cmd aponta para o `shell.cmd` ao lado dos outros scripts; nada de
+    // política, encadeamento ou perfil de login se aplica a ele.
+    let cmd = report.shell(ShellKind::Cmd).unwrap();
+    assert_eq!(cmd.profiles, vec![base.join("shell.cmd")]);
+    assert_eq!(cmd.policy, None);
+    assert!(!cmd.policy_blocks);
+    assert!(!cmd.chains_user_function);
+    assert_eq!(cmd.bash_login, None);
+
     assert_eq!(
         asked,
         vec![ShellKind::WindowsPowerShell],
@@ -258,9 +267,10 @@ fn the_report_covers_each_shell_present() {
     assert!(report.blocked_by_policy());
 }
 
-/// Sem Git Bash, ele não entra no quadro; com tudo no lugar, está pronto.
+/// Sem Git Bash, ele não entra no quadro — o cmd entra sempre. Com o resto no
+/// lugar está pronto, mesmo sem o `AutoRun`: ele é opt-in por botão próprio.
 #[test]
-fn without_git_bash_the_report_has_only_powershell() {
+fn without_git_bash_the_report_has_powershell_and_cmd() {
     let (tmp, env) = machine(false, true);
     let home = tmp.path().join("home");
     let documents = home.join("Documents");
@@ -290,9 +300,67 @@ fn without_git_bash_the_report_has_only_powershell() {
         |_| Some("RemoteSigned".to_string()),
     );
 
-    assert_eq!(report.shells.len(), 1);
+    assert_eq!(report.shells.len(), 2);
     assert_eq!(report.shells[0].kind, ShellKind::PowerShell7);
+    assert_eq!(report.shells[1].kind, ShellKind::Cmd);
     assert!(report.developer_mode);
     assert!(report.fully_installed());
     assert!(!report.blocked_by_policy());
+}
+
+fn shell(kind: ShellKind, loads_integration: bool) -> ShellReport {
+    ShellReport {
+        kind,
+        profiles: Vec::new(),
+        loads_integration,
+        policy: None,
+        policy_blocks: false,
+        chains_user_function: false,
+        bash_login: None,
+    }
+}
+
+/// Quadro sem shell nenhum não é quadro instalado. A lista fica vazia quando a
+/// Documentos não é achada, e o `all` sobre lista vazia dizia `true`: a tela
+/// mostrava "Instalada" com ZERO shell coberto.
+#[test]
+fn an_empty_report_is_never_fully_installed() {
+    let report = TerminalReport {
+        scripts: ScriptsState::Current,
+        shells: Vec::new(),
+        developer_mode: false,
+    };
+    assert!(!report.fully_installed());
+
+    // E só o cmd também não basta: ele não cobre nenhum dos outros terminais.
+    let only_cmd = TerminalReport {
+        shells: vec![shell(ShellKind::Cmd, true)],
+        ..report
+    };
+    assert!(!only_cmd.fully_installed());
+}
+
+/// O `AutoRun` é escolha explícita por botão próprio (valor GLOBAL do usuário):
+/// o cmd sem integração não deixa a tela vermelha para sempre. Os outros shells
+/// continuam sendo exigidos.
+#[test]
+fn the_cmd_does_not_count_for_fully_installed() {
+    let report = TerminalReport {
+        scripts: ScriptsState::Current,
+        shells: vec![
+            shell(ShellKind::PowerShell7, true),
+            shell(ShellKind::Cmd, false),
+        ],
+        developer_mode: false,
+    };
+    assert!(report.fully_installed());
+
+    let pwsh_missing = TerminalReport {
+        shells: vec![
+            shell(ShellKind::PowerShell7, false),
+            shell(ShellKind::Cmd, true),
+        ],
+        ..report
+    };
+    assert!(!pwsh_missing.fully_installed());
 }

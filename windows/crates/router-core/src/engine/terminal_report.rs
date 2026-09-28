@@ -11,6 +11,11 @@
 //! CLI contarem a mesma história. A consulta da política abre um PowerShell (não
 //! é de graça), então quem monta o quadro a injeta — e só a faz onde a linha
 //! está no perfil: sem ela, a política não decide nada.
+//!
+//! O Prompt de Comando entrou em 25/09/2026, e é a linha mais silenciosa de
+//! todas: sem ele no quadro, `claude <grupo>` no cmd subia no perfil PADRÃO e
+//! queimava a cota do grupo errado sem uma palavra. Ele está sempre presente e
+//! não se instala junto com os outros — ver `fully_installed`.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -22,7 +27,14 @@ use regex::Regex;
 
 use super::shell_integration::{ShellIntegration, ShellTargets};
 use crate::platform::atomic_write::read_retrying;
+use crate::platform::command_processor::{self, CommandProcessorKey};
 use crate::platform::process::run_with_timeout;
+
+/// O que identifica o nosso segmento no `AutoRun` — o mesmo marcador que o
+/// `shell_integration` planta nos scripts. Repetido aqui porque lá ele é
+/// privado ao módulo, e aquele arquivo é de outra trilha; divergindo os dois,
+/// a tela diria "não instalada" com o `AutoRun` no lugar.
+const SHIM_MARKER: &str = "falcao-router-shim";
 
 /// Os shells em que `claude <grupo>` pode rodar.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -127,15 +139,28 @@ pub fn parse_policy_list(output: &str, default: &str) -> String {
         .map_or_else(|| default.to_string(), |p| p.to_string())
 }
 
+/// Um PowerShell filho SEM o ambiente do processo que o abriu.
+///
+/// Medido em 25/09/2026: um 5.1 filho de um pwsh 7 herda o `PSModulePath` do 7,
+/// não acha o `Microsoft.PowerShell.Security` dele e fica sem
+/// `Get-ExecutionPolicy`/`Set-ExecutionPolicy` — o `doctor` imprimia "não foi
+/// possível consultar a política" bem onde a resposta importa. O
+/// `PSExecutionPolicyPreference` sai junto: é o escopo Process herdado (o shell
+/// do Claude Code roda com `Bypass`), e ele não decide nada num terminal novo.
+fn clean_powershell(exe: &Path) -> Command {
+    let mut command = Command::new(exe);
+    command.env_remove("PSModulePath");
+    command.env_remove("PSExecutionPolicyPreference");
+    command.args(["-NoProfile", "-NonInteractive", "-Command"]);
+    command
+}
+
 /// Consulta a política efetiva de uma edição (abre um PowerShell; até 30 s).
 pub fn effective_policy(edition: &PowerShellEdition) -> Option<String> {
-    let mut command = Command::new(&edition.exe);
-    command.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
+    let mut command = clean_powershell(&edition.exe);
+    command.arg(
         "Get-ExecutionPolicy -List | ForEach-Object { '{0}={1}' -f $_.Scope, $_.ExecutionPolicy }",
-    ]);
+    );
     let (code, out) = run_with_timeout(command, None, Duration::from_secs(30))?;
     (code == Some(0)).then(|| parse_policy_list(&out, edition.default_policy))
 }
@@ -149,13 +174,10 @@ pub fn policy_blocks_profiles(policy: &str) -> bool {
 /// edição que estava bloqueando. Diretiva de grupo (MachinePolicy/UserPolicy)
 /// continua vencendo — por isso quem chama confere de novo depois.
 pub fn allow_profiles(edition: &PowerShellEdition) -> bool {
-    let mut command = Command::new(&edition.exe);
-    command.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force",
-    ]);
+    // Mesmo ambiente limpo da consulta: o `Set-ExecutionPolicy` vem do mesmo
+    // módulo que some quando o `PSModulePath` é herdado de outra edição.
+    let mut command = clean_powershell(&edition.exe);
+    command.arg("Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force");
     matches!(
         run_with_timeout(command, None, Duration::from_secs(30)),
         Some((Some(0), _))
@@ -276,7 +298,8 @@ pub struct ShellReport {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TerminalReport {
     pub scripts: ScriptsState,
-    /// Na ordem PowerShell 7, Windows PowerShell 5.1, Git Bash (só os presentes).
+    /// Na ordem PowerShell 7, Windows PowerShell 5.1, Git Bash (só os
+    /// presentes) e o Prompt de Comando, que está sempre lá.
     pub shells: Vec<ShellReport>,
     /// Com o Developer Mode, `CLAUDE.md`, `keybindings.json` e o histórico são
     /// links; sem ele, cópias sincronizadas e histórico por grupo.
@@ -334,6 +357,24 @@ impl TerminalReport {
                 bash_login: Some(bash_login_profile(&targets.home)),
             });
         }
+        // O cmd nunca é omitido por ausência: não existe Windows sem ele. O que
+        // varia é só o `AutoRun` já carregar o `shell.cmd` — e nada de política,
+        // encadeamento ou perfil de login se aplica aqui.
+        shells.push(ShellReport {
+            kind: ShellKind::Cmd,
+            // O `shell.cmd` é irmão do `shell.ps1` (os três scripts saem da
+            // mesma pasta de dados), então o quadro o deriva em vez de pedir
+            // mais um parâmetro a quem chama.
+            profiles: vec![ps1.with_file_name("shell.cmd")],
+            loads_integration: command_processor::has_marker(
+                &CommandProcessorKey::current_user(),
+                SHIM_MARKER,
+            ),
+            policy: None,
+            policy_blocks: false,
+            chains_user_function: false,
+            bash_login: None,
+        });
         TerminalReport {
             scripts: scripts_state(ps1, sh, router, git_bash.is_some()),
             shells,
@@ -347,9 +388,21 @@ impl TerminalReport {
 
     /// Scripts atuais e todo shell presente carregando a integração, sem nada
     /// que a impeça de rodar.
+    ///
+    /// O cmd NÃO entra na conta: mexer no `AutoRun` é escrever um valor GLOBAL
+    /// do usuário — ele roda em toda invocação de `cmd.exe`, inclusive as de
+    /// terceiros —, então é opt-in por botão próprio, como o "Permitir" da
+    /// política. Quem não o escolheu não pode ficar com a tela vermelha para
+    /// sempre.
     pub fn fully_installed(&self) -> bool {
+        let required = || self.shells.iter().filter(|s| s.kind != ShellKind::Cmd);
+        // Lista vazia faz o `all` dizer `true`, e ela fica vazia justamente
+        // quando a Documentos não é achada: sem esta exigência a tela dizia
+        // "Instalada" com ZERO shell coberto — o modo de falha silencioso que
+        // este arquivo existe para combater.
         self.scripts == ScriptsState::Current
-            && self.shells.iter().all(|s| {
+            && required().next().is_some()
+            && required().all(|s| {
                 s.loads_integration
                     && !s.policy_blocks
                     && !matches!(s.bash_login, Some(BashLogin::Ignores(_)))
