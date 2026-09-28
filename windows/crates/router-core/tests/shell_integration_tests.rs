@@ -372,7 +372,7 @@ fn the_scripts_are_written_in_each_shells_encoding() {
     let router = Path::new(r"C:\Users\exemplo\AppData\Local\FalcaoTokenRouter\router.exe");
     let (ps1, sh) = (tmp.path().join("shell.ps1"), tmp.path().join("shell.sh"));
 
-    ShellIntegration::write_scripts(router, &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(router, &ps1, &sh, &tmp.path().join("shell.cmd")).unwrap();
 
     let ps_bytes = fs::read(&ps1).unwrap();
     assert!(ps_bytes.starts_with(&[0xEF, 0xBB, 0xBF]));

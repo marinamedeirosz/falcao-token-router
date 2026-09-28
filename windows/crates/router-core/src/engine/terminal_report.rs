@@ -32,6 +32,11 @@ pub enum ShellKind {
     /// O PowerShell 7 (`pwsh`).
     PowerShell7,
     GitBash,
+    /// O Prompt de Comando. Diferente dos outros três em duas coisas que o
+    /// modelo precisa acomodar: está SEMPRE presente (não há máquina Windows sem
+    /// ele, então a linha nunca é omitida por ausência), e não tem `$PROFILE` —
+    /// quem carrega a integração é o `AutoRun` do registro.
+    Cmd,
 }
 
 /// Uma edição do PowerShell instalada nesta máquina.
@@ -249,8 +254,12 @@ pub fn scripts_state(ps1: &Path, sh: &Path, router: &Path, with_bash: bool) -> S
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ShellReport {
     pub kind: ShellKind,
-    /// O arquivo que a integração edita (`$PROFILE` ou `~\.bashrc`).
-    pub profile: PathBuf,
+    /// Os arquivos que a integração edita neste shell (`$PROFILE` de cada host,
+    /// ou `~\.bashrc`). É uma LISTA porque uma edição do PowerShell tem um
+    /// perfil por host — o console e o Console Integrado do VS Code leem
+    /// arquivos diferentes, e cobrir só o primeiro deixava o segundo sem
+    /// integração, em silêncio. No `Cmd` é o caminho do `shell.cmd`.
+    pub profiles: Vec<PathBuf>,
     /// O perfil carrega o script do router.
     pub loads_integration: bool,
     /// A política efetiva (só PowerShell, e só consultada com a linha no lugar).
@@ -305,7 +314,7 @@ impl TerminalReport {
             let policy = if loads { policy_of(edition) } else { None };
             shells.push(ShellReport {
                 kind,
-                profile: profile.clone(),
+                profiles: vec![profile.clone()],
                 loads_integration: loads,
                 policy_blocks: policy.as_deref().is_some_and(policy_blocks_profiles),
                 policy,
@@ -317,7 +326,7 @@ impl TerminalReport {
             let line = ShellIntegration::bash_source_line(sh);
             shells.push(ShellReport {
                 kind: ShellKind::GitBash,
-                profile: targets.bashrc.clone(),
+                profiles: vec![targets.bashrc.clone()],
                 loads_integration: ShellIntegration::profile_has_line(&targets.bashrc, &line),
                 policy: None,
                 policy_blocks: false,

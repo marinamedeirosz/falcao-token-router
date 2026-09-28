@@ -287,11 +287,27 @@ claude() {{
         )
     }
 
-    /// Grava os dois scripts, cada um na codificação do seu shell: `shell.ps1`
-    /// em UTF-8 COM BOM e CRLF (o PowerShell 5.1 lê arquivo sem BOM como ANSI e
+    /// `shell.cmd`: a macro `doskey` do Prompt de Comando.
+    ///
+    /// Em ASCII PURO, sem exceção: o `cmd.exe` lê arquivo de lote na code page
+    /// OEM do console, e acento ali é corrupção garantida — a mesma razão do
+    /// `PROFILE_COMMENT` acima.
+    ///
+    /// TRILHA T5: `@echo off`, o marcador num `rem`, uma guarda `if not exist`
+    /// no `router.exe` (é ela que mantém o terminal limpo depois de desinstalar
+    /// o app) e o `doskey claude=<router> shim $*`.
+    pub fn cmd_script(_router: &Path) -> String {
+        String::new()
+    }
+
+    /// Grava os scripts, cada um na codificação do seu shell: `shell.ps1` em
+    /// UTF-8 COM BOM e CRLF (o PowerShell 5.1 lê arquivo sem BOM como ANSI e
     /// estragaria um caminho com acento); `shell.sh` sem BOM e com LF (o bash
-    /// leria o BOM como parte do primeiro comando).
-    pub fn write_scripts(router: &Path, ps1: &Path, sh: &Path) -> io::Result<()> {
+    /// leria o BOM como parte do primeiro comando); `shell.cmd` em ASCII e CRLF.
+    ///
+    /// Conteúdo vazio não vira arquivo — é o que deixa o `cmd_script` chegar
+    /// stub sem plantar um `shell.cmd` inútil no disco de ninguém.
+    pub fn write_scripts(router: &Path, ps1: &Path, sh: &Path, cmd: &Path) -> io::Result<()> {
         let mut ps_bytes = vec![0xEF, 0xBB, 0xBF];
         ps_bytes.extend_from_slice(
             Self::powershell_script(router)
@@ -299,7 +315,12 @@ claude() {{
                 .as_bytes(),
         );
         write_atomic(ps1, &ps_bytes)?;
-        write_atomic(sh, Self::bash_script(router).as_bytes())
+        write_atomic(sh, Self::bash_script(router).as_bytes())?;
+        let cmd_text = Self::cmd_script(router);
+        if cmd_text.is_empty() {
+            return Ok(());
+        }
+        write_atomic(cmd, cmd_text.replace('\n', "\r\n").as_bytes())
     }
 
     /// A linha do `$PROFILE`. Com o script sob `%LOCALAPPDATA%`, escrita com a

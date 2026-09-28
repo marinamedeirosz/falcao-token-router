@@ -36,6 +36,7 @@
     powerShell7: "PowerShell 7",
     windowsPowerShell: "Windows PowerShell 5.1",
     gitBash: "Git Bash",
+    cmd: "Prompt de Comando",
   };
   /** O que o `.bash_profile` gerado pelo Git for Windows tem, e o que falta
    *  num que ignora o `.bashrc`. */
@@ -147,7 +148,7 @@
       {#each report.shells as shell (shell.shell)}
         {@const state = status(shell)}
         <li>
-          <span class="name" title={shell.profile}>{SHELL_NAMES[shell.shell]}</span>
+          <span class="name" title={shell.profiles.join("\n")}>{SHELL_NAMES[shell.shell]}</span>
           <div class="facts">
             {#if state === "ok"}
               <p class="ok"><Icon name="check" size={12} /><span>{t("groups.terminal.shell.ok")}</span></p>

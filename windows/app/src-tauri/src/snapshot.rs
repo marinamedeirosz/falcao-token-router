@@ -522,6 +522,7 @@ mod tests {
             &router,
             &store.powershell_script_path(),
             &store.bash_script_path(),
+            &store.cmd_script_path(),
         )
         .unwrap();
         assert_eq!(

@@ -20,7 +20,13 @@ use router_core::platform::git_bash::{find_git_bash, GitBashEnv};
 fn write_scripts(w: &World) -> (PathBuf, PathBuf) {
     let base = w.sandbox.paths().base;
     let (ps1, sh) = (base.join("shell.ps1"), base.join("shell.sh"));
-    ShellIntegration::write_scripts(&assert_cmd::cargo::cargo_bin("router"), &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(
+        &assert_cmd::cargo::cargo_bin("router"),
+        &ps1,
+        &sh,
+        &base.join("shell.cmd"),
+    )
+    .unwrap();
     (ps1, sh)
 }
 
@@ -140,7 +146,7 @@ fn a_missing_router_is_announced_loudly() {
     let base = w.sandbox.paths().base;
     let (ps1, sh) = (base.join("shell.ps1"), base.join("shell.sh"));
     let gone = w.sandbox.cwd.join("sumiu").join("router.exe");
-    ShellIntegration::write_scripts(&gone, &ps1, &sh).unwrap();
+    ShellIntegration::write_scripts(&gone, &ps1, &sh, &base.join("shell.cmd")).unwrap();
     let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
     let powershell = PathBuf::from(system).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
     let test = w.sandbox.cwd.join("teste.ps1");

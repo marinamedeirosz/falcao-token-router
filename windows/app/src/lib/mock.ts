@@ -190,6 +190,9 @@ const PROFILES: Record<ShellName, string> = {
   powerShell7: "C:\\Users\\exemplo\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1",
   windowsPowerShell: "C:\\Users\\exemplo\\Documents\\WindowsPowerShell\\Microsoft.PowerShell_profile.ps1",
   gitBash: "C:\\Users\\exemplo\\.bashrc",
+  // O cmd não tem perfil: quem carrega a integração é o AutoRun do registro,
+  // apontando para este script.
+  cmd: "C:\\Users\\exemplo\\AppData\\Local\\com.synqo.falcao-router\\shell.cmd",
 };
 
 /** Um shell com a integração no lugar; o cenário estraga o que quiser. */
@@ -197,7 +200,7 @@ function shellView(shell: ShellName, partial: Partial<ShellView> = {}): ShellVie
   const bash = shell === "gitBash";
   return {
     shell,
-    profile: PROFILES[shell],
+    profiles: [PROFILES[shell]],
     loadsIntegration: true,
     policy: bash ? null : "RemoteSigned",
     policyBlocks: false,
@@ -271,6 +274,8 @@ function installTerminal(): boolean {
     powerShell7: "RemoteSigned",
     windowsPowerShell: "Restricted",
     gitBash: null,
+    // O cmd não tem política de execução.
+    cmd: null,
   };
   const shells = terminal.shells.map((s) => {
     // Sem a linha no perfil a política nem era consultada; agora é.
@@ -683,6 +688,30 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
       terminal = terminalView(terminal.scripts, shells, terminal.routerFound);
     }
     return structuredClone(terminal);
+  },
+  // O AutoRun é um valor do registro: escrever e apagar são instantâneos.
+  enable_cmd_integration: async () => {
+    const shells = terminal.shells.map((s) => (s.shell === "cmd" ? { ...s, loadsIntegration: true } : s));
+    terminal = terminalView(terminal.scripts, shells, terminal.routerFound);
+    return structuredClone(terminal);
+  },
+  disable_cmd_integration: async () => {
+    const shells = terminal.shells.map((s) => (s.shell === "cmd" ? { ...s, loadsIntegration: false } : s));
+    terminal = terminalView(terminal.scripts, shells, terminal.routerFound);
+    return structuredClone(terminal);
+  },
+  // A saída do `router doctor` é pt-BR fixo, como a da CLI: texto técnico.
+  run_doctor: async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    return [
+      "router doctor",
+      "  base: C:\\Users\\exemplo\\AppData\\Local\\com.synqo.falcao-router",
+      "  ok  config: 1 grupo(s), 2 conta(s)",
+      "  ok  shell.ps1 aponta para este binário",
+      "  !!  você está no Prompt de Comando e a integração dele não está ativa",
+      "",
+      "há problemas acima.",
+    ].join("\n");
   },
   get_settings: () => ({ ...settings }),
   set_autostart: (args) => {

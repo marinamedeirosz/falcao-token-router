@@ -29,6 +29,7 @@ pub enum ShellName {
     PowerShell7,
     WindowsPowerShell,
     GitBash,
+    Cmd,
 }
 
 impl From<ShellKind> for ShellName {
@@ -37,6 +38,7 @@ impl From<ShellKind> for ShellName {
             ShellKind::PowerShell7 => ShellName::PowerShell7,
             ShellKind::WindowsPowerShell => ShellName::WindowsPowerShell,
             ShellKind::GitBash => ShellName::GitBash,
+            ShellKind::Cmd => ShellName::Cmd,
         }
     }
 }
@@ -53,8 +55,9 @@ pub enum BashLoginView {
 #[serde(rename_all = "camelCase")]
 pub struct ShellView {
     pub shell: ShellName,
-    /// O arquivo que a integração edita (para o usuário achar, se quiser).
-    pub profile: String,
+    /// Os arquivos que a integração edita (para o usuário achar, se quiser).
+    /// Lista: uma edição do PowerShell tem um `$PROFILE` por host.
+    pub profiles: Vec<String>,
     pub loads_integration: bool,
     pub policy: Option<String>,
     pub policy_blocks: bool,
@@ -106,7 +109,11 @@ fn view(report: &TerminalReport, router_found: bool) -> TerminalView {
             .iter()
             .map(|s| ShellView {
                 shell: s.kind.into(),
-                profile: s.profile.to_string_lossy().into_owned(),
+                profiles: s
+                    .profiles
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
                 loads_integration: s.loads_integration,
                 policy: s.policy.clone(),
                 policy_blocks: s.policy_blocks,
@@ -206,7 +213,9 @@ pub async fn allow_profiles_for(app: AppHandle, shell: ShellName) -> Result<Term
         let kind = match shell {
             ShellName::PowerShell7 => ShellKind::PowerShell7,
             ShellName::WindowsPowerShell => ShellKind::WindowsPowerShell,
-            ShellName::GitBash => return build(&app),
+            // Só PowerShell tem política de execução: nos outros não há o que
+            // permitir, e o quadro volta como está.
+            ShellName::GitBash | ShellName::Cmd => return build(&app),
         };
         if let Some(edition) = powershell_editions(&EditionEnv::from_process())
             .into_iter()
@@ -220,6 +229,47 @@ pub async fn allow_profiles_for(app: AppHandle, shell: ShellName) -> Result<Term
     .map_err(|e| e.to_string())
 }
 
+/// "Ativar no cmd": escreve o `AutoRun` do Prompt de Comando.
+///
+/// É opt-in por botão próprio, e não parte do "Ativar" geral, porque o `AutoRun`
+/// é um valor GLOBAL do usuário — roda em toda invocação de `cmd.exe`, inclusive
+/// as que scripts de terceiros disparam. Mexer nele é escolha explícita, como o
+/// "Permitir" da política de execução já é.
+///
+/// TRILHA T11: `command_processor::install` com o caminho do `shell.cmd`.
+#[tauri::command]
+pub async fn enable_cmd_integration(app: AppHandle) -> Result<TerminalView, String> {
+    tauri::async_runtime::spawn_blocking(move || build(&app))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// "Desativar no cmd": tira só o NOSSO segmento do `AutoRun`, preservando o de
+/// quem mais estiver lá (clink, ConEmu, Anaconda).
+///
+/// TRILHA T11: `command_processor::remove`.
+#[tauri::command]
+pub async fn disable_cmd_integration(app: AppHandle) -> Result<TerminalView, String> {
+    tauri::async_runtime::spawn_blocking(move || build(&app))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// "Diagnosticar": roda o próprio `router.exe doctor` e devolve a saída crua.
+///
+/// O diagnóstico era inalcançável para quem mais precisava dele: o app não o
+/// expunha, o `router.exe` não está no PATH, e a linha do README é sintaxe de
+/// PowerShell — que dá erro justamente no cmd. Sobe o binário em vez de
+/// refatorar o `Report`, que hoje imprime direto no stdout.
+///
+/// A saída é pt-BR fixo, como a da CLI: é texto técnico, não string de catálogo.
+///
+/// TRILHA T11: `run_with_timeout` sobre `store.router_path()` com `doctor`.
+#[tauri::command]
+pub async fn run_doctor(_app: AppHandle) -> Result<String, String> {
+    Err("ainda não implementado".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,9 +280,9 @@ mod tests {
     fn shell(kind: ShellKind, loads: bool) -> ShellReport {
         ShellReport {
             kind,
-            profile: PathBuf::from(
+            profiles: vec![PathBuf::from(
                 r"C:\Users\exemplo\Documents\PowerShell\Microsoft.PowerShell_profile.ps1",
-            ),
+            )],
             loads_integration: loads,
             policy: None,
             policy_blocks: false,
@@ -299,7 +349,7 @@ mod tests {
     #[test]
     fn the_bash_login_file_is_named() {
         let mut bash = shell(ShellKind::GitBash, true);
-        bash.profile = PathBuf::from(r"C:\Users\exemplo\.bashrc");
+        bash.profiles = vec![PathBuf::from(r"C:\Users\exemplo\.bashrc")];
         bash.bash_login = Some(BashLogin::Ignores(PathBuf::from(
             r"C:\Users\exemplo\.bash_login",
         )));

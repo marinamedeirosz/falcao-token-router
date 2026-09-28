@@ -89,7 +89,7 @@ export type ErrorView =
  *  router.exe, ou citando outro (app movido). */
 export type ScriptsState = "missing" | "current" | "stale";
 
-export type ShellName = "powerShell7" | "windowsPowerShell" | "gitBash";
+export type ShellName = "powerShell7" | "windowsPowerShell" | "gitBash" | "cmd";
 
 /** Quem o Git Bash lê ao abrir: nenhum perfil de login, um que carrega o
  *  `.bashrc`, ou um que o ignora (a integração nunca roda). */
@@ -98,8 +98,9 @@ export type BashLoginView = "missing" | "loads" | "ignores";
 /** Um shell presente na máquina e o que se sabe dele. */
 export interface ShellView {
   shell: ShellName;
-  /** O arquivo que a integração edita. */
-  profile: string;
+  /** Os arquivos que a integração edita — uma edição do PowerShell tem um
+   *  `$PROFILE` por host (console, VS Code…). No `cmd` é o `shell.cmd`. */
+  profiles: string[];
   loadsIntegration: boolean;
   /** A política de execução efetiva (só PowerShell, e só com a linha no perfil). */
   policy: string | null;

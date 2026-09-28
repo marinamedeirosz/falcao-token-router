@@ -2,6 +2,7 @@
 //! atômica de arquivo, e — nas próximas fases — links, liveness, caminhos curtos.
 
 pub mod atomic_write;
+pub mod command_processor;
 pub mod console;
 pub mod git_bash;
 pub mod host;
@@ -14,6 +15,7 @@ pub mod paths;
 pub mod powershell;
 pub mod process;
 pub mod process_times;
+pub mod process_tree;
 pub mod profile_append;
 pub mod short_path;
 pub mod ui_language;
