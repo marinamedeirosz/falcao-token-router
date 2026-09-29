@@ -4,7 +4,8 @@
 //! clique quando o ícone mora no excedente (`^`) do Windows 11.
 //!
 //! A janela é criada escondida na subida, para o primeiro clique ser imediato;
-//! a altura segue o conteúdo (o front mede e pede).
+//! a altura segue o conteúdo (o front mede e pede), até onde a TELA do monitor
+//! da âncora permite — nunca além dela, ou o rodapé fica fora de alcance.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -19,6 +20,8 @@ pub const FLYOUT_WINDOW: &str = "flyout";
 pub const WIDTH: f64 = 330.0;
 /// Folga entre o flyout e a barra/borda da tela (a dos flyouts do sistema).
 const GAP: i32 = 12;
+/// A menor altura que ainda é um painel (px lógicos).
+const MIN_HEIGHT: f64 = 120.0;
 /// Um clique no ícone logo depois de o flyout sumir por perda de foco é o
 /// MESMO gesto de fechar: o clique tirou o foco antes de chegar aqui.
 const REOPEN_GUARD: Duration = Duration::from_millis(300);
@@ -120,11 +123,15 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn work_area_for(app: &AppHandle, icon: Area) -> Option<Area> {
-    let monitor = app
-        .monitor_from_point(f64::from(icon.center_x()), f64::from(icon.center_y()))
-        .ok()
-        .flatten()
+/// A área útil (a tela sem a barra de tarefas) do monitor da âncora — o
+/// principal enquanto não houve clique nenhum.
+fn work_area_for(app: &AppHandle, icon: Option<Area>) -> Option<Area> {
+    let monitor = icon
+        .and_then(|icon| {
+            app.monitor_from_point(f64::from(icon.center_x()), f64::from(icon.center_y()))
+                .ok()
+                .flatten()
+        })
         .or_else(|| app.primary_monitor().ok().flatten())?;
     let work = monitor.work_area();
     Some(Area {
@@ -143,7 +150,7 @@ fn place(app: &AppHandle) {
     let Some(icon) = *lock(&app.state::<FlyoutState>().anchor) else {
         return;
     };
-    let (Some(work), Ok(size)) = (work_area_for(app, icon), window.outer_size()) else {
+    let (Some(work), Ok(size)) = (work_area_for(app, Some(icon)), window.outer_size()) else {
         return;
     };
     let w = i32::try_from(size.width).unwrap_or(0);
@@ -175,14 +182,39 @@ pub fn toggle(app: &AppHandle, icon: Area) {
     let _ = window.set_focus();
 }
 
+/// A altura que a janela recebe (px lógicos): o conteúdo, nunca menos que o
+/// mínimo e nunca mais do que a tela oferece — numa tela menor que o mínimo,
+/// quem cede é o mínimo.
+fn fitted_height(content: f64, available: f64) -> f64 {
+    // `f64::max` devolve o outro lado quando um é NaN: a medida do front (JS)
+    // chegando estranha cai no mínimo em vez de virar um tamanho inválido.
+    content.max(MIN_HEIGHT).min(available).max(1.0)
+}
+
+/// Quanta altura a tela oferece ao flyout, em pixels FÍSICOS: a área útil do
+/// monitor menos as duas folgas que o posicionamento reserva.
+fn available_height(app: &AppHandle) -> Option<f64> {
+    let icon = *lock(&app.state::<FlyoutState>().anchor);
+    let work = work_area_for(app, icon)?;
+    Some(f64::from(work.h - 2 * GAP))
+}
+
 /// O front mediu o conteúdo: ajusta a altura e reposiciona na âncora (com a
 /// barra embaixo, a borda de baixo fica onde estava).
+///
+/// O teto é a TELA, não um número fixo. Com os 900 px lógicos de antes, num
+/// monitor escalado a 150 % (1032 px físicos úteis = 688 lógicos) a janela saía
+/// pela borda de baixo e levava junto o rodapé — Grupos, Ajustes e Sair —,
+/// deixando o usuário sem caminho para as telas do app nem para encerrá-lo. A
+/// área útil vem do Windows em pixels FÍSICOS e a medida do front em LÓGICOS:
+/// só dá para comparar depois de dividir pela escala.
 pub fn fit_height(app: &AppHandle, logical_height: f64) {
     let Some(window) = app.get_webview_window(FLYOUT_WINDOW) else {
         return;
     };
     let scale = window.scale_factor().unwrap_or(1.0);
-    let height = logical_height.clamp(120.0, 900.0);
+    let available = available_height(app).map_or(f64::INFINITY, |physical| physical / scale);
+    let height = fitted_height(logical_height, available);
     let size = PhysicalSize::new(
         (WIDTH * scale).round() as u32,
         (height * scale).round() as u32,
@@ -290,6 +322,28 @@ mod tests {
             h: 32,
         };
         assert_eq!(position(icon, WORK, 330, 400), (1516 - 165, 900 - 400 - 12));
+    }
+
+    /// Conteúdo alto num monitor escalado a 150 %: a janela para na tela. Antes
+    /// ia a 900 px lógicos (1350 físicos) numa área útil de 1032 e o rodapé
+    /// ficava fora — sem Grupos, Ajustes nem Sair.
+    #[test]
+    fn tall_content_stops_at_what_the_screen_offers() {
+        let available = f64::from(WORK.h - 2 * GAP) / 1.5;
+        assert_eq!(fitted_height(1200.0, available), available);
+        assert!(available < 900.0, "a escala encolhe a tela em px lógicos");
+    }
+
+    #[test]
+    fn content_that_fits_gets_exactly_its_height() {
+        assert_eq!(fitted_height(420.0, 1008.0), 420.0);
+    }
+
+    #[test]
+    fn a_tiny_panel_gets_the_minimum_and_a_tiny_screen_takes_it_back() {
+        assert_eq!(fitted_height(40.0, 1008.0), MIN_HEIGHT);
+        assert_eq!(fitted_height(400.0, 90.0), 90.0, "tela menor que o mínimo");
+        assert_eq!(fitted_height(f64::NAN, 1008.0), MIN_HEIGHT);
     }
 
     /// Monitor secundário à esquerda (coordenadas negativas).

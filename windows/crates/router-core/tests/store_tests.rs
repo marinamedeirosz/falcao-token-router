@@ -926,6 +926,115 @@ fn a_home_outside_the_router_base_is_never_discarded() {
     assert!(outside_dir.exists());
 }
 
+/// O mesmo marcador que os scripts e o `AutoRun` carregam. Repetido aqui porque
+/// no motor ele é privado ao módulo (ver o comentário lá).
+const SHIM_MARKER: &str = "falcao-router-shim";
+
+/// Uma chave de registro de teste, que se apaga sozinha — inclusive quando o
+/// teste falha. Nada aqui toca o `AutoRun` de verdade da máquina.
+struct TempKey(router_core::platform::command_processor::CommandProcessorKey);
+
+impl TempKey {
+    fn new(name: &str) -> Self {
+        let key = router_core::platform::command_processor::CommandProcessorKey::for_tests(name);
+        // Um teste anterior interrompido pode ter deixado a chave para trás.
+        delete_test_key(&key);
+        TempKey(key)
+    }
+}
+
+impl Drop for TempKey {
+    fn drop(&mut self) {
+        delete_test_key(&self.0);
+    }
+}
+
+/// Apaga só a folha: a pasta-mãe é compartilhada com os outros testes, que o
+/// cargo roda em paralelo.
+fn delete_test_key(key: &router_core::platform::command_processor::CommandProcessorKey) {
+    let subkey: Vec<u16> = key.subkey.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: a string UTF-16 termina em zero e vive até o fim da chamada; a
+    // subchave é nossa, sob `Software\FalcaoRouterTests`.
+    unsafe {
+        windows_sys::Win32::System::Registry::RegDeleteKeyW(
+            windows_sys::Win32::System::Registry::HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+        )
+    };
+}
+
+/// "Ativar no cmd" escreve o `AutoRun` apontando para o `shell.cmd`, e
+/// "Desativar" o tira. É o único shell cuja integração não mora num arquivo de
+/// perfil: sem esta escrita, `claude <grupo>` no Prompt de Comando sobe no
+/// perfil PADRÃO e queima a cota do grupo errado, sem uma palavra.
+#[test]
+fn enabling_the_cmd_integration_writes_the_autorun_and_disabling_removes_it() {
+    use router_core::platform::command_processor::{autorun, has_marker};
+
+    let key = TempKey::new("store-autorun");
+    let mut env = make_store();
+    env.store
+        .set_router_path(Some(env.tmp.path().join("app").join("router.exe")));
+
+    env.store.enable_cmd_integration_with(&key.0).unwrap();
+
+    let value = autorun(&key.0).unwrap();
+    let script = env.store.cmd_script_path();
+    assert!(
+        value.contains(&*script.to_string_lossy()),
+        "o AutoRun não aponta para o shell.cmd: {value}"
+    );
+    // O quadro da tela procura o marcador NO VALOR para dizer "instalada"; o
+    // caminho sozinho não o contém.
+    assert!(has_marker(&key.0, SHIM_MARKER), "sem marcador: {value}");
+
+    env.store.disable_cmd_integration_with(&key.0).unwrap();
+
+    assert_eq!(autorun(&key.0), None);
+}
+
+/// Depois de atualizar o app, o script antigo cita o MESMO caminho de router (a
+/// pasta de instalação não muda) — só o conteúdo é de outra versão. Se a
+/// obsolescência for medida por substring, a cura na subida não faz nada e
+/// qualquer conserto no shim fica invisível para quem já instalou.
+#[test]
+fn a_script_from_another_version_is_stale_at_the_same_router_path() {
+    use router_core::engine::shell_integration::{ShellTargets, StatusShell};
+
+    let mut env = make_store();
+    let targets = ShellTargets::for_home(&env.tmp.path().join("home"), None);
+    env.store
+        .set_router_path(Some(env.tmp.path().join("app").join("router.exe")));
+    env.store
+        .install_shell_integration(&targets, StatusShell::PowerShell)
+        .unwrap();
+    assert!(!env.store.integration_is_stale(StatusShell::PowerShell));
+
+    for script in [
+        env.store.powershell_script_path(),
+        env.store.bash_script_path(),
+        env.store.cmd_script_path(),
+    ] {
+        let current = std::fs::read(&script).unwrap();
+        let mut older = current.clone();
+        older.extend_from_slice(b"\r\nrem linha que a versao anterior tinha\r\n");
+        std::fs::write(&script, &older).unwrap();
+
+        assert!(
+            env.store.integration_is_stale(StatusShell::PowerShell),
+            "{} de outra versão passou por atual",
+            script.display()
+        );
+
+        std::fs::write(&script, &current).unwrap();
+        assert!(
+            !env.store.integration_is_stale(StatusShell::PowerShell),
+            "{} atual acusado de obsoleto",
+            script.display()
+        );
+    }
+}
+
 /// O aviso de erro da tela pode ser dispensado: o erro some do store, e só
 /// volta com uma nova falha.
 #[test]

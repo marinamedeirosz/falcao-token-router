@@ -8,7 +8,10 @@
   // cada problema aparece com a correção dele:
   // - "Ativar"/"Reinstalar" só promete o que instalar resolve (`needsInstall`);
   // - a política tem o "Permitir", com confirmação (muda um ajuste do Windows);
-  // - o `.bash_profile` é do usuário: a tela mostra a linha, com copiar.
+  // - o `.bash_profile` é do usuário: a tela mostra a linha, com copiar;
+  // - o Prompt de Comando tem "Ativar no cmd"/"Desativar", também com
+  //   confirmação: ele não tem perfil, e a integração dele é o `AutoRun` do
+  //   registro — um valor GLOBAL do usuário, dividido com clink/ConEmu/Anaconda.
   // "Instalada ✓" só aparece quando TUDO foi gravado — o macOS mostrava o ✓
   // mesmo com a instalação falhando.
   import * as api from "../lib/api";
@@ -17,6 +20,7 @@
   import Rich from "../lib/Rich.svelte";
   import type { ShellName, ShellView, Snapshot, TerminalView } from "../lib/types";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import DiagnosticsPanel from "./DiagnosticsPanel.svelte";
 
   let {
     report,
@@ -42,8 +46,13 @@
    *  num que ignora o `.bashrc`. */
   const BASHRC_LINE = "test -f ~/.bashrc && . ~/.bashrc";
 
-  type Status = "ok" | "missing" | "blocked" | "bashIgnores";
+  type Status = "ok" | "missing" | "blocked" | "bashIgnores" | "cmdOff";
   function status(shell: ShellView): Status {
+    // O cmd não tem perfil nem política de execução: a integração dele é o
+    // `AutoRun`, opt-in por botão próprio. Sem ele a linha não está "faltando
+    // instalar" — está DESATIVADA, e isso é normal (nem conta para "Instalada",
+    // e o "Ativar" geral não a resolveria: instalar não escreve o registro).
+    if (shell.shell === "cmd") return shell.loadsIntegration ? "ok" : "cmdOff";
     if (!shell.loadsIntegration) return "missing";
     if (shell.policyBlocks) return "blocked";
     if (shell.bashLogin === "ignores") return "bashIgnores";
@@ -87,6 +96,20 @@
         : stillBlocked.filter((s) => s !== shell);
     } finally {
       allowing = null;
+    }
+  }
+
+  // MARK: Ativar no cmd / Desativar
+  /** Qual confirmação está aberta (as duas mexem no mesmo valor do registro). */
+  let cmdConfirm = $state<"enable" | "disable" | null>(null);
+  let cmdBusy = $state(false);
+  async function applyCmd(enable: boolean) {
+    cmdConfirm = null;
+    cmdBusy = true;
+    try {
+      onReport(await (enable ? api.enableCmdIntegration() : api.disableCmdIntegration()));
+    } finally {
+      cmdBusy = false;
     }
   }
 
@@ -152,6 +175,9 @@
           <div class="facts">
             {#if state === "ok"}
               <p class="ok"><Icon name="check" size={12} /><span>{t("groups.terminal.shell.ok")}</span></p>
+            {:else if state === "cmdOff"}
+              <!-- Info, não ⚠: não estar ativada é o estado normal do cmd. -->
+              <p class="muted"><Icon name="info" size={12} /><span><Rich text={t("groups.terminal.cmd.off")} /></span></p>
             {:else if state === "missing"}
               <p class="warn"><Icon name="warning" size={12} /><span>{t("groups.terminal.shell.missing")}</span></p>
             {:else if state === "blocked"}
@@ -190,6 +216,20 @@
                 </button>
               </div>
             {/if}
+            {#if shell.shell === "cmd"}
+              <div class="fix">
+                {#if cmdBusy}
+                  <span class="busy"><span class="spinner" aria-hidden="true"></span>{t("groups.terminal.cmd.applying")}</span>
+                {:else}
+                  <button
+                    class="secondary small"
+                    onclick={() => (cmdConfirm = shell.loadsIntegration ? "disable" : "enable")}
+                  >
+                    {shell.loadsIntegration ? t("groups.terminal.cmd.disable") : t("groups.terminal.cmd.enable")}
+                  </button>
+                {/if}
+              </div>
+            {/if}
             {#if shell.chainsUserFunction && state !== "missing"}
               <p class="muted"><Icon name="info" size={12} /><span><Rich text={t("groups.terminal.shell.chains")} /></span></p>
             {/if}
@@ -210,7 +250,25 @@
       </div>
     </div>
   {/if}
+
+  <DiagnosticsPanel />
 </section>
+
+{#if cmdConfirm}
+  {@const enable = cmdConfirm === "enable"}
+  <ConfirmDialog
+    title={enable
+      ? t("groups.terminal.cmd.enable.confirm.title")
+      : t("groups.terminal.cmd.disable.confirm.title")}
+    message={enable
+      ? t("groups.terminal.cmd.enable.confirm.message")
+      : t("groups.terminal.cmd.disable.confirm.message")}
+    confirm={enable ? t("groups.terminal.cmd.enable") : t("groups.terminal.cmd.disable")}
+    destructive={false}
+    onConfirm={() => void applyCmd(enable)}
+    onCancel={() => (cmdConfirm = null)}
+  />
+{/if}
 
 {#if confirming}
   {@const shell = confirming}

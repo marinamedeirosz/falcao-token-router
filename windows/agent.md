@@ -13,7 +13,7 @@ um `.github/workflows/windows.yml` filtrado por caminho).
 - `crates/router-core/` — o motor (modelos, credencial em arquivo, rotação, store, sessões,
   integração de terminal, sonda). Sem UI, sem rede.
 - `crates/router-cli/` — a CLI `router` (`statusline`, `launch`, `is-group`, `rotate`, `measure`,
-  `doctor`).
+  `doctor`, `shim`, `uninstall-integration`).
 - `crates/fake-claude/` — `claude` de mentira para os testes de integração (nunca empacotado).
 - `crates/gauge-mark/` — a marca (o anel): bandeja e ícone do app do mesmo desenho, por pixel.
 - `docs/PLATFORM.md` — os fatos do Windows verificados (inglês), o mapa macOS → Windows e as

@@ -39,10 +39,12 @@ use router_core::engine::session_registry::{SessionRegistry, SessionStatus};
 use router_core::engine::shell_integration::{ShellIntegration, ShellTargets, StatusShell};
 use router_core::engine::terminal_report::{
     bash_login_profile, defines_claude_function, effective_policy, policy_blocks_profiles,
-    powershell_editions, BashLogin, EditionEnv,
+    powershell_editions, BashLogin, EditionEnv, ShellKind, ShellReport, TerminalReport,
 };
 use router_core::platform::atomic_write::read_retrying;
+use router_core::platform::command_processor::{autorun, has_marker, CommandProcessorKey};
 use router_core::platform::git_bash::{find_git_bash, GitBashEnv};
+use router_core::platform::process_tree::{parent_shell, ParentShell};
 use router_core::statusline::choice::{Item, Mode, StatusLineChoice};
 use router_core::statusline::command::{self, Outcome, Shell};
 use router_core::statusline::session;
@@ -138,6 +140,21 @@ pub fn run() -> bool {
     check_scripts(&mut report, &ps1, &sh, &me, git_bash.is_some());
     let targets = ShellTargets::for_user(Path::new(&home));
     check_profiles(&mut report, &targets, &ps1, &sh, git_bash.is_some());
+    // O shell em que o `doctor` está rodando vem depois dos perfis: as duas
+    // linhas abaixo são as únicas que perguntam ao SISTEMA (a árvore de
+    // processos, o registro) em vez de olharem só o disco.
+    let cmd = paths.base.join("shell.cmd");
+    let cmd_state = cmd_autorun(&cmd);
+    check_current_shell(
+        &mut report,
+        &targets,
+        &ps1,
+        &sh,
+        &me,
+        git_bash.as_deref(),
+        cmd_state,
+    );
+    check_autorun(&mut report, &cmd, cmd_state);
     let runner = Shell::detect();
     check_status_lines(&mut report, &config, &me, shell, runner.as_ref());
     check_status_line_choice(&mut report, &paths, runner.as_ref());

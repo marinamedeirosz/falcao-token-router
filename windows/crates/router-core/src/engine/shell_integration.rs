@@ -85,7 +85,28 @@ const PROFILE_COMMENT: &str = "# Falcao Router - integracao de terminal (claude 
 
 /// O que identifica a função do router — no bash é um comando (`:`), porque o
 /// `declare -f` joga fora os comentários.
-const SHIM_MARKER: &str = "falcao-router-shim";
+///
+/// **Público, e tem de continuar sendo um só.** Cinco lugares dependem deste
+/// texto EXATO: os três scripts o carregam, o quadro procura por ele no valor do
+/// `AutoRun` para acender a linha do cmd, a instalação o escreve e a
+/// desinstalação o usa para achar o próprio segmento. Um marcador divergente não
+/// dá erro — dá um "Ativar no cmd" que grava e nunca acende, e um "Desativar"
+/// que não acha nada para tirar.
+pub const SHIM_MARKER: &str = "falcao-router-shim";
+
+/// A linha que o `cmd.exe` roda antes do primeiro prompt, apontando para o
+/// `shell.cmd`.
+///
+/// O caminho vai entre aspas porque a pasta de dados pode ter espaço, e o
+/// marcador entra como ARGUMENTO, no MESMO segmento: o quadro reconhece a
+/// integração procurando o marcador no valor do `AutoRun`, e o caminho sozinho
+/// não o contém — a pasta se chama `com.synqo.falcao-router`, sem o `-shim`.
+/// Argumento, e não um `& rem <marcador>` à parte, porque um segmento separado
+/// seria o único a sair na remoção, deixando a chamada do script órfã no
+/// registro. O `shell.cmd` não lê `%1`, então o extra é inerte.
+pub fn autorun_call(script: &Path) -> String {
+    format!("\"{}\" {SHIM_MARKER}", script.display())
+}
 
 /// O `.bash_profile` que o próprio Git for Windows criaria (com um WARNING
 /// vermelho) ao achar `.bashrc` sem nenhum dos três perfis de login.

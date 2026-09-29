@@ -59,11 +59,20 @@ Modelos, formato da amostra, leitor de uso, credencial, rotação e o store. Sem
   existia no perfil (marcador `falcao-router-shim` — no bash como comando `:`, porque o
   `declare -f` joga fora comentários); linhas de perfil ASCII guardadas por `Test-Path`/`[ -f ]`;
   `ShellTargets` (os dois `$PROFILE` sob a Documentos real, `.bashrc`); `ensure_bash_profile`.
+  `shell.cmd` (ASCII puro e MUDO — o cmd lê lote na code page OEM, e o `AutoRun` roda em todo
+  `cmd /c` de terceiro, onde um byte impresso corromperia um `for /f`), com guarda
+  `if not exist` que o deixa inofensivo depois de desinstalar, e `doskey claude=<router> shim $*`.
+  `SHIM_MARKER` e `autorun_call` são **públicos e únicos**: cinco lugares dependem do texto
+  exato — divergir não dá erro, dá um "Ativar no cmd" que grava e nunca acende.
 - `terminal_report.rs` — o estado da integração POR SHELL (novo, fase 5): edições do PowerShell
   (5.1 do sistema; `pwsh` no `ProgramFiles` ou no PATH), política efetiva sem o escopo Process e
   a correção consentida (`RemoteSigned` em CurrentUser), `function claude` do usuário (UTF-8 e
   UTF-16LE), perfil de login do Git Bash, scripts atuais/obsoletos, e o `TerminalReport` que a
-  tela de Grupos mostra e o `doctor` confere.
+  tela de Grupos mostra e o `doctor` confere. O **Prompt de Comando** é a quarta linha e a mais
+  silenciosa: está SEMPRE presente (não há Windows sem ele), não tem `$PROFILE` — quem carrega
+  a integração é o `AutoRun` do registro — e **não conta** para `fully_installed`, porque mexer
+  num valor global do usuário é escolha explícita, com botão próprio. `fully_installed` também
+  exige lista não-vazia: `all()` sobre vazio dizia "Instalada" com zero shell coberto.
 - `profile_sharing.rs` — ≙ `ProfileSharing`: pastas por junction; arquivos por symlink quando o
   Windows deixa, senão plano B (`CLAUDE.md`/`keybindings.json` copiados com mtime da origem e
   sincronizados — mais novo vence, backup do sobrescrito, só o que está no manifesto

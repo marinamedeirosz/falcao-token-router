@@ -35,7 +35,22 @@
   !insertmacro FALCAO_ROUTER_OUT_OF_THE_WAY
 !macroend
 
+; Antes de tirar o router.exe do caminho — depois da macro ele pode já estar
+; renomeado, e não haveria mais quem desfizesse a integração. Sem isto, quem
+; desinstala fica com a linha no $PROFILE e o segmento no AutoRun: a função
+; `claude` sobrevive ao app e avisa em vermelho a cada invocação, para sempre.
+;
+; Silencioso (nsExec não abre console) e tolerante: o código de saída é
+; descartado de propósito. Um $PROFILE preso por outro processo não pode
+; impedir a desinstalação — o pior caso é o que já acontecia antes.
 !macro NSIS_HOOK_PREUNINSTALL
+  Push $0
+  ${If} ${FileExists} "$INSTDIR\router.exe"
+    nsExec::ExecToLog '"$INSTDIR\router.exe" uninstall-integration'
+    Pop $0
+  ${EndIf}
+  Pop $0
+  ClearErrors
   !insertmacro FALCAO_ROUTER_OUT_OF_THE_WAY
 !macroend
 

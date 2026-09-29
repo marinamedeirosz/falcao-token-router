@@ -40,6 +40,29 @@ Funções pequenas atrás das quais mora o que é da plataforma.
 - `profile_append.rs` — `append_block`: acrescenta ao perfil do shell **em bytes**, na
   codificação do BOM (UTF-16LE/BE, UTF-8; sem BOM o bloco é ASCII, igual em ANSI) e no fim de
   linha do arquivo; modo append (segue link, não troca o arquivo); arquivo ilegível = erro.
+  `remove_block`: tira o bloco. Grava **no lugar** (truncate+write), nunca `write_atomic` — o
+  rename trocaria um `$PROFILE` que é link simbólico pelo arquivo novo, e o perfil de verdade
+  ficaria órfão. Corta por **faixa de bytes**, não decodifica-edita-regrava: `decode` é lossy,
+  e um perfil ANSI com acento voltaria ao disco com U+FFFD. `decode_profile`: a ÚNICA leitura
+  de BOM completa do repositório — havia três cópias e só esta trata UTF-16**BE**, o que
+  deixava o botão "Ativar" nunca ficar verde num perfil salvo assim.
+- `command_processor.rs` — o `AutoRun` do Prompt de Comando
+  (`HKCU\Software\Microsoft\Command Processor`), espelho do `profile_append` para o registro:
+  o cmd não tem `$PROFILE`, e é dali que a macro `doskey claude` nasce. **Compõe, nunca
+  sobrescreve**: clink, ConEmu e Anaconda põem o deles no mesmo valor, e o separador de
+  terceiro volta como veio — trocar `&&` por `&` faria rodar sempre o que só devia rodar no
+  sucesso. Lê `REG_SZ` e `REG_EXPAND_SZ` (com `RRF_NOEXPAND`) e regrava o mesmo tipo: ler só
+  um faria o valor do outro parecer ausente e ser atropelado. Chave injetável — o teste não
+  toca o AutoRun da máquina.
+- `process_tree.rs` — `processes`/`parent_chain`/`parent_shell`: em que shell o processo
+  nasceu. Existe porque NADA no produto sabia isso, e o `doctor` dizia "tudo certo" no único
+  caso que não enxergava (o usuário no cmd). `parent_chain` para por teto **e** por conjunto
+  de visitados: a foto do Toolhelp não é atômica e pid reciclado fecha ciclo.
+- `console.rs` — o Ctrl+C no `router launch`. Sem `exec` no Windows, o `router` espera o
+  filho; um Ctrl+C vai para TODOS os processos do console, e se o `router` morresse o shell
+  voltaria ao prompt com o `claude` rodando por baixo. Handler PRÓPRIO devolvendo TRUE — o
+  atalho `SetConsoleCtrlHandler(NULL, TRUE)` liga um atributo HERDADO, e o `claude` passaria
+  a ignorar Ctrl+C também.
 - `process.rs` — `run_with_timeout`: comando curto com prazo (stdout por thread, mata ao
   estourar), sem console (`CREATE_NO_WINDOW` — do app cada consulta piscaria uma janela).
 - `links.rs` — `junction` (pastas, sem privilégio), `symlink_file` (flag
@@ -53,6 +76,15 @@ Funções pequenas atrás das quais mora o que é da plataforma.
   mata o shell, e um `node` pendurado sobraria a cada render (o Windows não tem grupo de
   processos). Criado suspenso para nenhum neto escapar entre o `spawn` e a entrada no job.
 
-## Pendências (Fase 4+)
-- console (Ctrl+C no `launch`, na CLI). A política de execução do PowerShell mora em
-  `engine::terminal_report` desde a fase 5.
+- 28/09/2026: a enumeração Toolhelp saiu do `#[cfg(test)] mod test_support` do `job.rs` para
+  o `process_tree.rs` de produção, e o `test_support` passou a chamá-la. Era a única
+  implementação e estava do lado errado da cerca.
+
+## Pendências
+- `write_atomic` **troca** um symlink/junction do usuário por arquivo comum (o rename não
+  segue link). O `profile_append::remove_block` já contorna gravando no lugar; os demais
+  chamadores ainda não.
+- Nada usa o prefixo `\\?\`: caminho acima de 260 não é tratado, e os perfis de grupo são
+  fundos.
+- `run_with_timeout` mata só o filho direto, tendo o `job::spawn_contained` na pasta ao lado;
+  e decodifica a saída como UTF-8, que não é o que o console do Windows entrega.

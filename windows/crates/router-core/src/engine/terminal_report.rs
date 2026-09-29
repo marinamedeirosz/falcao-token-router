@@ -25,16 +25,10 @@ use std::time::Duration;
 
 use regex::Regex;
 
-use super::shell_integration::{ShellIntegration, ShellTargets};
+use super::shell_integration::{ShellIntegration, ShellTargets, SHIM_MARKER};
 use crate::platform::atomic_write::read_retrying;
 use crate::platform::command_processor::{self, CommandProcessorKey};
 use crate::platform::process::run_with_timeout;
-
-/// O que identifica o nosso segmento no `AutoRun` — o mesmo marcador que o
-/// `shell_integration` planta nos scripts. Repetido aqui porque lá ele é
-/// privado ao módulo, e aquele arquivo é de outra trilha; divergindo os dois,
-/// a tela diria "não instalada" com o `AutoRun` no lugar.
-const SHIM_MARKER: &str = "falcao-router-shim";
 
 /// Os shells em que `claude <grupo>` pode rodar.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

@@ -27,6 +27,9 @@ claude            → plain Claude Code, as before
   taking turns between them.
 - *Optional:* **Git for Windows**. When it's installed, Claude Code runs the status
   line through Git Bash, and `claude <group>` works in Git Bash as well.
+- **Any shell.** PowerShell 7, Windows PowerShell 5.1 and Git Bash are covered by a
+  `claude` function your profile loads. The **Command Prompt** (`cmd.exe`) has no
+  profile, so it is covered a different way — one extra click, in step 3 below.
 
 ## Install
 
@@ -87,6 +90,13 @@ passes through the app, and neither does a token.
 Under **Terminal integration**, click **Activate**. That adds one line to your
 PowerShell profiles and, if you have Git Bash, to `~/.bashrc`. Each shell then has a
 row that says whether it loads the integration.
+
+If you work in the **Command Prompt**, its row needs one more click: **Enable in cmd**.
+`cmd.exe` has no profile, so the integration goes into `AutoRun`, a setting shared with
+tools like clink and ConEmu — whatever is already there is kept, and no administrator
+rights are needed. It is a separate button, and stays off until you ask, because it
+changes a global setting of your account. Leaving it off is fine: the row says "not
+enabled", not "broken", and it does not hold back the green checkmark.
 
 If a PowerShell row says the **execution policy** stops your profile from running,
 click **Allow (RemoteSigned for your user)** — or run
@@ -207,10 +217,14 @@ threshold.
   Run anyway**.
 - **The icon is hidden behind the ^** on the taskbar — Windows 11 does that to every
   new icon. Drag it out, or use **Settings → Show in taskbar** in the app.
-- **`claude work` opens plain `claude`.** The terminal was opened before the
-  integration (open a new one — or run `. $PROFILE` in PowerShell,
-  `source ~/.bashrc` in Git Bash), or the execution policy blocks your profile (see
-  step 3). `router doctor` says which.
+- **`claude work` opens plain `claude`.** Three causes, and `router doctor` — or
+  **Diagnose**, in the app — names which one. (a) You are in the **Command Prompt** and
+  its integration is off: opening another terminal changes nothing there, because there
+  is no profile to load; turn it on in step 3. (b) The terminal was opened before the
+  integration: open a new one, or run `. $PROFILE` in PowerShell, `source ~/.bashrc` in
+  Git Bash. (c) The execution policy blocks your profile (see step 3).
+- **The PowerShell Integrated Console in VS Code** uses a different `$PROFILE` than the
+  console host, and the integration does not reach it yet.
 - **Your own `claude` function** in your profile keeps working: the integration
   chains it, so plain `claude`, without a group, still goes through yours.
 - **Developer Mode is off** (the Windows default): `CLAUDE.md` and
@@ -250,10 +264,16 @@ the app again afterwards — the installer's last page offers to.
    uninstaller's **Delete the application data** box removes only the app's own
    settings and cache. A `claude <group>` session that is still open keeps running;
    the `router.exe` it uses goes to your `%TEMP%` folder.
-3. Remove the integration: in each PowerShell, `notepad $PROFILE` and delete the
-   line that mentions `com.synqo.falcao-router`; do the same in `~/.bashrc`. Until
-   you do, `claude <group>` prints a red warning that `router.exe` is missing and
-   runs plain `claude`.
+3. The uninstaller already removes the integration for you — the profile lines and
+   the `AutoRun` entry — before it deletes the program. If you need to do it by hand
+   (or undo it without uninstalling), run:
+
+   ```
+   "%LOCALAPPDATA%\FalcaoTokenRouter\router.exe" uninstall-integration
+   ```
+
+   It takes out only what this app wrote: an `AutoRun` you share with other tools keeps
+   everything else.
 4. To delete the groups and accounts as well:
 
    ```powershell

@@ -377,8 +377,47 @@ fn doctor_reports_the_state_of_the_installation() {
         "{text}"
     );
     assert!(text.contains("(2.1.280 (Claude Code))"), "{text}");
+    // O shell em que o `doctor` rodou e o estado do `AutoRun` do cmd: o
+    // VEREDITO de cada um depende da máquina de quem roda a suíte (quem chama é
+    // o cargo, de um shell qualquer), mas a linha tem de estar lá.
+    assert!(text.contains("shell atual:"), "{text}");
+    assert!(text.contains("AutoRun do Prompt de Comando"), "{text}");
     assert!(text.trim_end().ends_with("há problemas acima."), "{text}");
     assert_eq!(out.status.code(), Some(1));
+}
+
+/// O caso que paga esta trilha: rodado DE DENTRO do Prompt de Comando, o
+/// `doctor` nomeia o shell e REPROVA — antes ele dizia "tudo certo" para quem
+/// digitava `claude <grupo>` ali e abria na conta errada.
+///
+/// Determinístico mesmo numa máquina com a integração do cmd ativa de verdade:
+/// o `AutoRun` dela cita o `shell.cmd` da instalação real, nunca o do sandbox.
+#[test]
+fn the_doctor_fails_inside_a_cmd_without_the_integration() {
+    let w = world(1);
+    let system = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+    let out = w
+        .sandbox
+        .command(std::path::Path::new(&format!(r"{system}\System32\cmd.exe")))
+        .arg("/c")
+        .arg(assert_cmd::cargo::cargo_bin("router"))
+        .arg("doctor")
+        .output()
+        .unwrap();
+
+    let text = stdout(&out);
+    assert!(
+        text.contains("!!  shell atual: Prompt de Comando, SEM a integração"),
+        "{text}"
+    );
+    // A mensagem não pode culpar "terminal aberto antes da integração": no cmd
+    // abrir outro terminal não muda nada, e a pessoa repete a ação até desistir.
+    assert!(
+        text.contains("Abrir outro terminal não muda nada"),
+        "{text}"
+    );
+    assert!(text.contains("Ativar no cmd"), "{text}");
+    assert_eq!(out.status.code(), Some(1), "{text}");
 }
 
 fn write_choice(w: &World, choice: serde_json::Value) {

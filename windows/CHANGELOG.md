@@ -7,6 +7,53 @@ a fix on one platform never waits for the other's calendar.
 > ⚠️ `releases/latest` is **ambiguous** in this repository — it resolves to
 > whichever platform released last. Link to a tag, never to `/latest`.
 
+## [Unreleased]
+
+### `claude <group>` now works in the Command Prompt
+
+It did not, and the failure was silent in the worst way. The integration covered
+the PowerShell `$PROFILE` and Git Bash's `~/.bashrc`; `cmd.exe` has neither, so
+`claude work` fell through to `claude.exe` on the PATH and the group name became
+the first prompt. The session then opened in the **default** profile and spent
+that group's quota, while the accounts you asked for stayed at zero forever and
+their rotation never fired. `router doctor` said "all good" — it never asked
+which shell you were in, and that was the one case it could not see.
+
+- **Enable in cmd**, in Groups → Terminal integration. It writes `AutoRun`, which
+  defines a `doskey` macro. It is a separate, opt-in button because `AutoRun` is a
+  global setting of your account, shared with clink, ConEmu and Anaconda —
+  whatever is already there is kept, including the `&&` of a chained command.
+  A `doskey` macro only exists in an interactive console, so the `cmd /c` that
+  npm, MSBuild and VS Code tasks run still reaches the real `claude` untouched.
+- **`router doctor` names the shell you are in**, and fails when that shell has no
+  integration. It also stops blaming "a terminal opened before the integration"
+  for what is an uncovered shell — in cmd, opening another terminal changes
+  nothing, and that advice sent people in circles.
+- **Diagnose**, in the app: the doctor's output without leaving the window. It was
+  unreachable for exactly the people who needed it — the app never exposed it,
+  `router.exe` is not on the PATH, and the documented invocation is PowerShell
+  syntax, which errors in cmd.
+- **`router uninstall-integration`**, also run by the uninstaller before it
+  deletes the program. Uninstalling used to leave a broken `claude` function
+  warning in red on every invocation, forever.
+
+### Fixed
+
+- **Rotation no longer undoes a manual choice.** Activating an account that had
+  not served yet — and therefore had no sample — let the engine fall through to
+  the first account in the order on the next loop, three minutes later, with
+  nothing on screen explaining it. Switching now requires proof that the active
+  account went over.
+- **"Installed ✓" with no shell covered.** `all()` over an empty list is `true`,
+  and the list is empty exactly when the Documents folder is not found.
+- **A shim fix never reached anyone who had already installed.** Staleness was
+  decided by whether the script mentioned the router's path; since the install
+  folder does not change between versions, the old script always did.
+- **The flyout cut off its own footer.** The ceiling was a fixed 900 logical
+  pixels; at 150% scaling the usable height is 688, so Groups/Settings/Quit went
+  off screen.
+- **An open login dialog froze rotation for every group**, with no time limit.
+
 ## [1.0.0] — 2026-09-24
 
 First Windows release. The port reads and writes the same files as the macOS
